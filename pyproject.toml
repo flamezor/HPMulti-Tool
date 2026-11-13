@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hpmultitool"
+version = "0.1.2"
+description = "GUI for data acquisition with HP / Agilent / Keysight 34401A multimeters over RS-232"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "GPL-3.0-or-later"}
+authors = [{name = "flamezor"}]
+dependencies = ["PySide6-Essentials>=6.6", "pyqtgraph>=0.13.7", "pyserial>=3.5"]
+
+[project.gui-scripts]
+hpmultitool = "hpmultitool.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["hpmultitool*"]
