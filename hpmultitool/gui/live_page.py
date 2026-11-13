@@ -25,8 +25,7 @@ from ..instrument import DeviceInfo
 from ..live import LiveSession
 from ..paths import autosave_dir
 from .device_panel import FUNCTION_ORDER
-from .plotting import ClockAxis
-from .style import THEMES
+from .plotting import ClockAxis, apply_plot_theme, style_plot
 from .widgets import DataCombo, hint, muted
 
 LIVE_RATES = [(0, N_("As fast as possible")), (0.2, N_("0.2 s")), (0.5, N_("0.5 s")),
@@ -415,12 +414,7 @@ class LivePage(QWidget):
         return self.record is not None and self.record.finished_at is None
 
     def apply_theme(self, theme: str):
-        self.plot_widget.setBackground(THEMES[theme]["plot_bg"])
-        layout = self.plot_widget.ci
-        for row in range(layout.layout.rowCount()):
-            item = layout.getItem(row, 0)
-            if item is not None:
-                self.main._style_plot(item)
+        apply_plot_theme(self.plot_widget, theme)
 
     def _set_dirty(self):
         self._dirty = True
@@ -436,7 +430,7 @@ class LivePage(QWidget):
     def start(self):
         if self.running or self.main.busy():
             return
-        selected = self.main._selected()
+        selected = self.main.selected_devices()
         if not selected:
             QMessageBox.information(self, APP_NAME, tr("Tick at least one instrument under "
                                                        "Measurement › Instruments."))
@@ -446,7 +440,7 @@ class LivePage(QWidget):
         except ValueError as error:
             QMessageBox.warning(self, APP_NAME, str(error))
             return
-        self.main._store_configs()
+        self.main.store_configs()
         self._errors = []
         self._build_panels(selected)
         self.session = session
@@ -497,7 +491,7 @@ class LivePage(QWidget):
         self.curves, self.data = [], []
         first = None
         for slot, (info, config) in enumerate(selected):
-            color = self.main._device_color(info)
+            color = self.main.device_color(info)
             panel = LivePanel(slot, info, config, color)
             panel.config_changed.connect(self._config_changed)
             panel.pause_toggled.connect(self._pause_toggled)
@@ -505,7 +499,7 @@ class LivePage(QWidget):
             self.panel_row.addWidget(panel, 1)
             item = self.plot_widget.addPlot(row=slot, col=0,
                                             axisItems={"bottom": ClockAxis(orientation="bottom")})
-            self.main._style_plot(item)
+            style_plot(item, self.main.theme)
             item.setLabel("bottom", tr("Time of day"))
             item.setClipToView(True)
             item.setDownsampling(auto=True, mode="peak")
@@ -663,7 +657,7 @@ class LivePage(QWidget):
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         try:
             self.writer = LiveCsvWriter(autosave_dir() / f"{stamp}_live_{names}.csv", self.record,
-                                        self.main.csv_format.currentData())
+                                        self.main.csv_format)
         except OSError as error:
             self.writer = None
             self.main.log_message(tr("Autosave not possible: {error}", error=error), "warn")

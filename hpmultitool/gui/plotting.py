@@ -6,6 +6,70 @@ import time
 from datetime import datetime
 
 import pyqtgraph as pg
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QImage, QPainter
+
+from ..functions import (CONV_NONE, MATH_LIMIT, TOL_ABSOLUTE, TOL_PERCENT, TOL_RANGE,
+                         DeviceConfig)
+from .style import THEMES
+
+
+def style_plot(item, theme: str) -> None:
+    """Apply the theme colours to the axes and grid of one plot."""
+    colors = THEMES[theme]
+    for axis in ("left", "bottom"):
+        ax = item.getAxis(axis)
+        ax.setPen(pg.mkPen(colors["grid"]))
+        ax.setTextPen(pg.mkPen(colors["muted"]))
+    item.showGrid(x=True, y=True, alpha=0.25)
+
+
+def plot_items(widget: pg.GraphicsLayoutWidget) -> list:
+    """All plots stacked in the first column of a layout widget."""
+    layout = widget.ci
+    return [layout.getItem(r, 0) for r in range(layout.layout.rowCount())
+            if layout.getItem(r, 0) is not None]
+
+
+def apply_plot_theme(widget: pg.GraphicsLayoutWidget, theme: str) -> None:
+    widget.setBackground(THEMES[theme]["plot_bg"])
+    for item in plot_items(widget):
+        style_plot(item, theme)
+
+
+def limit_values(config: DeviceConfig) -> list[float]:
+    """Limits to draw in the plot, when they refer to the measured value."""
+    if config.math == MATH_LIMIT:
+        return [config.limit_lower, config.limit_upper]
+    if config.conversion != CONV_NONE:
+        return []
+    if config.tolerance == TOL_PERCENT:
+        d = abs(config.tol_nominal) * config.tol_value / 100
+        return [config.tol_nominal - d, config.tol_nominal + d]
+    if config.tolerance == TOL_ABSOLUTE:
+        return [config.tol_nominal - config.tol_value, config.tol_nominal + config.tol_value]
+    if config.tolerance == TOL_RANGE:
+        return [config.tol_low, config.tol_high]
+    return []
+
+
+def add_limit_lines(item, config: DeviceConfig, theme: str) -> None:
+    for value in limit_values(config):
+        item.addLine(y=value, pen=pg.mkPen(THEMES[theme]["danger"], width=1, style=Qt.DotLine))
+
+
+def render_png(widget: pg.GraphicsLayoutWidget, path: str, theme: str, ratio: float = 2.0) -> bool:
+    """Save the visible chart as PNG, rendered at ``ratio`` times the screen resolution."""
+    image = QImage(int(widget.width() * ratio), int(widget.height() * ratio),
+                   QImage.Format_ARGB32)
+    image.fill(QColor(THEMES[theme]["plot_bg"]))
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.TextAntialiasing)
+    widget.scene().render(painter, QRectF(image.rect()),
+                          widget.mapToScene(widget.viewport().rect()).boundingRect())
+    painter.end()
+    return image.save(path, "PNG")
 
 
 class ClockAxis(pg.AxisItem):

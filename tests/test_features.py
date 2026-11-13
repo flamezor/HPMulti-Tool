@@ -70,7 +70,7 @@ class LocalisationTests(unittest.TestCase):
 
 class LoopAndExportTests(unittest.TestCase):
     def test_loop_steps_distribution(self):
-        from hpmultitool.gui.main_window import build_loop_steps
+        from hpmultitool.series import build_loop_steps
         a, b = DeviceInfo("A", calibration_message="T034"), DeviceInfo("B", calibration_message="T049")
         steps = build_loop_steps([(a, DeviceConfig()), (b, DeviceConfig())],
                                  ["red", "yellow", "black", "white", "green"])

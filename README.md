@@ -102,12 +102,19 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 | `hpmultitool/analysis.py` | conversion, tolerance, statistics |
 | `hpmultitool/acquisition.py` | measurement run, one thread per instrument, common time grid |
 | `hpmultitool/live.py` | live mode: permanent connection, settings changed on the fly |
+| `hpmultitool/series.py` | measurement series (loop): objects distributed over instruments |
 | `hpmultitool/export.py` | CSV/TXT export, autosave |
 | `hpmultitool/profiles.py` | test profiles (JSON) |
 | `hpmultitool/device_id.py` | back up and write the instrument ID |
 | `hpmultitool/simulator.py` | simulated instrument for tests and `--simulate` |
 | `hpmultitool/i18n.py`, `i18n_de.py` | translation (English source texts, German catalogue) |
-| `hpmultitool/gui/` | user interface (PySide6, pyqtgraph), help pages |
+| `hpmultitool/gui/main_window.py` | main window: assembles the parts, instruments, profiles, export |
+| `hpmultitool/gui/measurement_runner.py` | runs a measurement or series and feeds the views |
+| `hpmultitool/gui/plan_card.py`, `sidebar_cards.py` | sidebar: measurement plan, instruments, test profile, export |
+| `hpmultitool/gui/results_view.py`, `readings.py`, `loop_banner.py` | readout tiles, chart, table, overview, log, series banner |
+| `hpmultitool/gui/live_page.py` | live mode page (virtual front panel) |
+| `hpmultitool/gui/device_panel.py`, `advanced_dialog.py` | instrument settings, ID and diagnostics |
+| `hpmultitool/gui/` (other) | header, plot helpers, styles, help pages, small widgets |
 
 **Translations:** texts in the code are English and wrapped in `tr("…")` (or `N_("…")` in data
 tables). The German catalogue `hpmultitool/i18n_de.py` maps English → German;
