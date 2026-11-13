@@ -29,6 +29,10 @@ class InstrumentError(RuntimeError):
     """The instrument reported an error or answered unexpectedly."""
 
 
+class ReadCancelled(TimeoutError):
+    """Waiting for an answer was aborted with ``HP34401A.cancel()``."""
+
+
 def decode_scpi_string(response: str) -> str:
     """Remove SCPI string quotes; keep significant spaces inside the string."""
     if len(response) < 2 or response[0] not in ('"', "'") or response[-1] != response[0]:
@@ -51,6 +55,7 @@ class HP34401A:
         self.port = port
         self.connection: serial.Serial | None = None
         self._lock = threading.RLock()
+        self._cancel = threading.Event()
 
     # -- connection -------------------------------------------------------
     def _open_serial(self):
@@ -171,21 +176,62 @@ class HP34401A:
             self._raw_write(command)
 
     def query(self, command: str, timeout: float | None = None) -> str:
+        """Send a query and return the answer line.
+
+        ``timeout`` defaults to the read timeout of the connection (``set_timeout``).
+        Raises ``TimeoutError`` if no complete line arrives in time and
+        ``ReadCancelled`` if ``cancel()`` was called while waiting.
+        """
         with self._lock:
             conn = self._require_open()
-            previous = conn.timeout
-            if timeout is not None:
-                conn.timeout = timeout
-            try:
-                # The answer arrives on its own; no busy wait for queries.
-                self._raw_write(command, wait_done=False)
-                response = conn.readline().decode("ascii", errors="replace").strip()
-            finally:
-                conn.timeout = previous
+            # The answer arrives on its own; no busy wait for queries.
+            self._raw_write(command, wait_done=False)
+            line = self._read_line(conn.timeout if timeout is None else timeout)
+            response = line.decode("ascii", errors="replace").strip()
             if not response:
                 raise TimeoutError(tr("No response from {port} to {command}",
                                   port=self.port, command=command))
             return response
+
+    # Waiting for an answer is split into short slices so that cancel() takes
+    # effect within this time, also during a long measurement (100 NPLC, slow
+    # AC filter, external trigger).
+    CANCEL_POLL = 0.2
+
+    def _read_line(self, timeout: float | None) -> bytes:
+        conn = self._require_open()
+        deadline = time.monotonic() + (timeout if timeout is not None else 1e9)
+        previous = conn.timeout
+        buffer = bytearray()
+        try:
+            while not buffer.endswith(b"\n"):
+                if self._cancel.is_set():
+                    raise ReadCancelled(f"{self.port}: read cancelled")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                conn.timeout = min(self.CANCEL_POLL, remaining)
+                buffer += conn.read_until(b"\n")
+        finally:
+            conn.timeout = previous
+        if buffer and not buffer.endswith(b"\n"):
+            # A cut-off answer must never be taken as a reading.
+            raise TimeoutError(f"{self.port}: incomplete answer {bytes(buffer)!r}")
+        return bytes(buffer)
+
+    def cancel(self) -> None:
+        """Abort waiting for an answer (thread-safe). Stays in effect until ``clear_cancel()``.
+
+        The instrument itself keeps measuring; ``device_clear()`` aborts that.
+        """
+        self._cancel.set()
+
+    def clear_cancel(self) -> None:
+        self._cancel.clear()
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancel.is_set()
 
     def set_timeout(self, seconds: float) -> None:
         self._require_open().timeout = seconds

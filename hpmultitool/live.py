@@ -36,6 +36,7 @@ class LiveDevice(threading.Thread):
         self._stop_event = threading.Event()
         self._paused = False
         self.t0 = time.monotonic()
+        self.meter = None
 
     # -- called from the GUI thread ------------------------------------------
     def set_config(self, config: DeviceConfig) -> None:
@@ -48,15 +49,21 @@ class LiveDevice(threading.Thread):
         self._commands.put(("pause", bool(paused)))
 
     def stop(self) -> None:
+        """Stop at once: a reading in progress is aborted, not waited for."""
         self._stop_event.set()
         self._commands.put(("wake", None))
+        meter = self.meter
+        if meter is not None:
+            meter.cancel()
 
     # -- thread ----------------------------------------------------------------
     def emit(self, kind, text="", **kwargs):
         self.events.put(Event(kind, self.slot, text, **kwargs))
 
     def run(self):
-        meter = open_instrument(self.info)
+        meter = self.meter = open_instrument(self.info)
+        if self._stop_event.is_set():  # stopped before the thread got here
+            meter.cancel()
         try:
             self.emit("status", tr("Connecting …"))
             meter.connect()
@@ -65,7 +72,8 @@ class LiveDevice(threading.Thread):
             self.emit("configured", tr("live"), data={"config": self.config})
             self._loop(meter)
         except SERIAL_ERRORS as error:
-            self.emit("error", str(error))
+            if not self._stop_event.is_set():  # errors caused by Stop are expected
+                self.emit("error", str(error))
         except Exception as error:  # never let a thread die silently
             self.emit("error", f"{type(error).__name__}: {error}")
         finally:
@@ -90,8 +98,8 @@ class LiveDevice(threading.Thread):
                 continue
             started = time.monotonic()
             reading = read_point(meter, self.config, self.slot, point, self.t0)
-            if self._stop_event.is_set() and reading.status == "TIMEOUT":
-                break
+            if reading.status == "CANCELLED":
+                break  # reading aborted by stop()
             self.emit("reading", reading=reading)
             point += 1
             if reading.status in ("TIMEOUT", "ERROR"):
@@ -112,6 +120,8 @@ class LiveDevice(threading.Thread):
                     meter.write(scpi)
                 meter.check_errors(tr("Instrument rejected the configuration"))
             except (ValueError, *SERIAL_ERRORS) as error:
+                if self._stop_event.is_set():
+                    return  # stopped while switching; the loop ends next
                 self.emit("warning", str(error))
                 # restore the previous, known-good configuration
                 try:

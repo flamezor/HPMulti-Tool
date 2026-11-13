@@ -2,9 +2,30 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QRunnable, Qt, Signal
-from PySide6.QtWidgets import (QComboBox, QFrame, QHBoxLayout, QLabel, QSizePolicy,
-                               QVBoxLayout, QWidget)
+from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, Signal
+from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QApplication, QComboBox,
+                               QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget)
+
+
+class WheelGuard(QObject):
+    """The mouse wheel scrolls the page and never changes a selection or number field.
+
+    Installed once on the application. Without it, scrolling through the settings
+    changes every combo or spin box that passes under the mouse pointer. Values are
+    changed by clicking (drop-down list) or with the keyboard.
+    """
+
+    def eventFilter(self, obj, event):  # noqa: N802 - Qt naming
+        if event.type() == QEvent.Wheel and isinstance(obj, (QComboBox, QAbstractSpinBox)):
+            # Scroll the surrounding scroll area instead. Qt does not pass a forwarded wheel
+            # event on to parent widgets, so it goes straight to the scroll bar.
+            area = obj.parentWidget()
+            while area is not None and not isinstance(area, QAbstractScrollArea):
+                area = area.parentWidget()
+            if area is not None:
+                QApplication.sendEvent(area.verticalScrollBar(), event)
+            return True
+        return False
 
 
 class Card(QFrame):
@@ -68,6 +89,25 @@ class DataCombo(QComboBox):
         self.blockSignals(False)
         if current is not None and not self.select_data(current) and self.count():
             self.setCurrentIndex(0)
+
+    def set_grouped_items(self, groups, current=None):
+        """Items under bold, non-selectable headings: groups = [(heading, [(data, text), …])]."""
+        self.blockSignals(True)
+        self.clear()
+        model = self.model()
+        for heading, items in groups:
+            self.addItem(heading)
+            header = model.item(self.count() - 1)
+            header.setFlags(Qt.NoItemFlags)     # cannot be selected, skipped by the keyboard
+            font = header.font()
+            font.setBold(True)
+            header.setFont(font)
+            for data, text in items:
+                self.addItem(text, data)
+        self.blockSignals(False)
+        if current is None or not self.select_data(current):
+            first = next((i for i in range(self.count()) if self.itemData(i) is not None), -1)
+            self.setCurrentIndex(first)
 
     def select_data(self, data) -> bool:
         for index in range(self.count()):

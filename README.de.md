@@ -14,8 +14,10 @@ Läuft unter Linux und Windows (Python 3.10+, Qt/PySide6). Oberfläche auf Deuts
   (Bereich, Digits/NPLC, Autozero, Eingangswiderstand, AC-Filter, Gate-Zeit)
 - Auflösungs-Vorschau: zeigt für jede Digits-Einstellung, wie ein Messwert aussieht
 - Math im Gerät: Null, Min/Max/Mittelwert, dB, dBm, Grenzwerttest
-- Auswertung am PC: lineare Umrechnung mit eigener Einheit, Wert pro Leitungslänge,
-  Pt100/Pt1000-Temperatur, Toleranzprüfung (i. O./n. i. O.), gleitender Mittelwert, Drift
+- Auswertung am PC: Messergebnis **x̄ ± u** für jede Messreihe – Mittelwert,
+  Standardabweichung, Student-Faktor t (68,3 / 95 / 99 %) und Gerätefehler aus dem Datenblatt
+  des 34401A (24 h / 90 Tage / 1 Jahr); mindestens 4 Messwerte für ein valides Ergebnis;
+  abschaltbar. Optional lineare Umrechnung mit eigener Einheit oder Wert pro Leitungslänge
 - **Messreihe (Loop)**: mehrere Objekte nacheinander messen, z. B. die Adern eines Kabels
   (rot, gelb, schwarz, …) – mit Anschlusshinweis, Wiederholen/Überspringen und Übersichtstabelle
 - **Messen bis stabil**: jedes Gerät hört auf, sobald seine letzten N Messwerte innerhalb einer
@@ -29,8 +31,9 @@ Läuft unter Linux und Windows (Python 3.10+, Qt/PySide6). Oberfläche auf Deuts
   jede Messung wird zusätzlich fortlaufend automatisch gesichert
 - Geräte werden über eine im Gerät gespeicherte Kennung identifiziert – unabhängig vom COM-Port;
   die Kennung lässt sich in den erweiterten Einstellungen ändern (mit automatischer Sicherung)
-- Modi ohne Messwerterfassung (z. B. Durchgang, Diode): Gerät umschalten und an die Frontplatte
-  übergeben
+- Durchgangsprüfung und Diodentest: Gerät in den Modus schalten und an die Frontplatte übergeben
+  (Piepton) oder im Live-Modus verfolgen; im Messablauf werden sie nicht protokolliert
+- Stopp bricht eine laufende Messung in Sekundenbruchteilen ab
 - Eingebaute Hilfe (F1)
 
 ## Start

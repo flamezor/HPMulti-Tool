@@ -7,14 +7,15 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from ..acquisition import Reading
-from ..analysis import VERDICT_PASS, derived_unit
-from ..export import DeviceRecord, status_text, verdict_text
-from ..functions import CONV_NONE, MATH_LIMIT, TOL_NONE, DeviceConfig, format_reading, format_value
+from ..analysis import MIN_READINGS, Evaluation, derived_unit, result_text
+from ..export import DeviceRecord, confidence_text, quantity_text, status_text
+from ..functions import CONV_NONE, MATH_LIMIT, DeviceConfig, format_reading, format_value
 from ..i18n import N_, localize_number, tr
 from ..instrument import DeviceInfo
 from .widgets import muted
 
-PASS_COLOR, FAIL_COLOR = "#34d399", "#f87171"
+WARN_COLOR, FAIL_COLOR = "#fbbf24", "#f87171"
+NBSP = " "
 
 
 class ReadoutTile(QFrame):
@@ -44,13 +45,19 @@ class ReadoutTile(QFrame):
         layout.addWidget(self.value)
         self.secondary = QLabel("")
         self.secondary.setAlignment(Qt.AlignRight)
-        self.secondary.setVisible(config.conversion != CONV_NONE or config.tolerance != TOL_NONE)
+        self.secondary.setVisible(config.conversion != CONV_NONE)
         layout.addWidget(self.secondary)
-        self.stats = muted("", wrap=False)
+        self.result = QLabel("")
+        self.result.setObjectName("ReadoutResult")
+        self.result.setAlignment(Qt.AlignRight)
+        self.result.setWordWrap(True)
+        layout.addWidget(self.result)
+        # Wraps when the tile is narrow; otherwise this line alone would force the window wider.
+        self.stats = muted("", wrap=True)
         self.stats.setAlignment(Qt.AlignRight)
         layout.addWidget(self.stats)
 
-    def show_reading(self, reading: Reading, stats: dict):
+    def show_reading(self, reading: Reading, ev: Evaluation):
         cfg = self.config
         if reading.value is None:
             self.value.setText(status_text(reading.status))
@@ -60,26 +67,43 @@ class ReadoutTile(QFrame):
             self.status.setText("⚠ " + status_text(reading.status))
         elif cfg.math == MATH_LIMIT:
             self.status.setText(tr("✓ within"))
-        parts = []
         if cfg.conversion != CONV_NONE:
-            parts.append("→ " + (format_value(reading.derived, derived_unit(cfg),
-                                              significant=cfg.digits + 1)
-                                 if reading.derived is not None else "—"))
-        if reading.verdict:
-            color = PASS_COLOR if reading.verdict == VERDICT_PASS else FAIL_COLOR
-            parts.append(f"<span style='color:{color}; font-weight:700'>"
-                         f"{verdict_text(reading.verdict)}</span>")
-        self.secondary.setText("   ".join(parts))
-        if stats.get("count"):
-            def fmt(v):
-                return format_reading(cfg, v)
-            text = f"min {fmt(stats['min'])}   max {fmt(stats['max'])}   Ø {fmt(stats['mean'])}"
-            if stats["count"] > 1:
-                text += f"   σ {format_value(stats['std'], cfg.unit, significant=3)}"
-            if "drift" in stats:
-                text += (f"   {tr('Drift')} "
-                         f"{format_value(stats['drift'], cfg.unit, significant=2)}/min")
-            self.stats.setText(text + f"   n = {stats['count']}")
+            self.secondary.setText("→ " + (format_value(reading.derived, derived_unit(cfg),
+                                                        significant=cfg.digits + 1)
+                                           if reading.derived is not None else "—"))
+        self.show_evaluation(ev)
+
+    def show_evaluation(self, ev: Evaluation):
+        """Running measurement result x̄ ± u and the figures behind it."""
+        cfg = self.config
+        if not ev.n:
+            return
+        # Line breaks only between the parts, never inside a result.
+        converted = ev.converted(cfg)
+        if ev.with_uncertainty:
+            parts = [f"x̄ ± u = {result_text(ev.mean, ev.u, cfg.unit)}"]
+            if converted is not None:
+                parts.append("→ " + result_text(converted.mean, converted.u, derived_unit(cfg)))
+            parts.append(f"({confidence_text(ev.confidence)})")
+        else:
+            parts = [f"x̄ = {format_reading(cfg, ev.mean)}"]
+            if converted is not None:
+                parts.append("→ " + result_text(converted.mean, None, derived_unit(cfg)))
+        text = "  ".join(part.replace(" ", NBSP) for part in parts)
+        if not ev.valid:
+            text = (f"<span style='color:{WARN_COLOR}'>⚠ "
+                    + tr("n < {n}: scatter not evaluable", n=MIN_READINGS)
+                    + f"</span><br>{text}")
+        self.result.setText(text)
+        parts = [f"s {quantity_text(ev.s, cfg.unit)}"]
+        if ev.with_uncertainty:
+            parts.append(f"h {quantity_text(ev.h, cfg.unit)}")
+        parts += [f"min {format_reading(cfg, ev.minimum)}", f"max {format_reading(cfg, ev.maximum)}",
+                  f"n = {ev.n}"]
+        if ev.invalid:
+            parts.append(tr("{n} invalid", n=ev.invalid))
+        # Wrap only between the figures, never between name, value and unit.
+        self.stats.setText("   ".join(part.replace(" ", NBSP) for part in parts))
 
     def set_status(self, text: str):
         self.status.setText(text)
@@ -87,8 +111,7 @@ class ReadoutTile(QFrame):
 
 class ReadingsModel(QAbstractTableModel):
     HEADERS = [N_("Time"), N_("t (s)"), N_("Step"), N_("Pt"), N_("Instrument"),
-               N_("Label"), N_("Reading"), N_("Calculated"), N_("Verdict"),
-               N_("Status"), N_("Raw value")]
+               N_("Label"), N_("Reading"), N_("Calculated"), N_("Status"), N_("Raw value")]
 
     def __init__(self):
         super().__init__()
@@ -133,15 +156,13 @@ class ReadingsModel(QAbstractTableModel):
                 r.timestamp.strftime("%H:%M:%S.%f")[:-3], localize_number(f"{r.elapsed:.3f}"),
                 str(rec.step), str(r.point), rec.info.label, cfg.label,
                 format_reading(cfg, r.value) if r.value is not None else "—",
-                derived, verdict_text(r.verdict), status_text(r.status), r.raw,
+                derived, status_text(r.status), r.raw,
             ][col]
         if role == Qt.TextAlignmentRole and col in (1, 2, 3, 6, 7):
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.ForegroundRole:
-            if col == 9 and r.status != "OK":
+            if col == 8 and r.status != "OK":
                 return QColor(FAIL_COLOR)
-            if col == 8 and r.verdict:
-                return QColor(PASS_COLOR if r.verdict == VERDICT_PASS else FAIL_COLOR)
         if role == Qt.FontRole and col in (6, 7):
             font = QFont("monospace")
             font.setStyleHint(QFont.Monospace)

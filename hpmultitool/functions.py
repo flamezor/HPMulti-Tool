@@ -79,22 +79,16 @@ TRIGGER_SOURCES = [("IMM", N_("Internal (immediate)")),
                    ("BUS", N_("Software (*TRG)"))]
 
 # ------------------------------------------------- PC-side evaluation
-CONV_NONE, CONV_LINEAR, CONV_PER_LENGTH, CONV_PT100, CONV_PT1000 = (
-    "NONE", "LINEAR", "PER_LENGTH", "PT100", "PT1000")
+CONV_NONE, CONV_LINEAR, CONV_PER_LENGTH = "NONE", "LINEAR", "PER_LENGTH"
 CONVERSION_LABELS = {
     CONV_NONE: N_("None"),
     CONV_LINEAR: N_("Linear: y = factor · x + offset (custom unit)"),
     CONV_PER_LENGTH: N_("Per length: value ÷ cable length (e.g. Ω/m)"),
-    CONV_PT100: N_("Temperature from Pt100 (°C)"),
-    CONV_PT1000: N_("Temperature from Pt1000 (°C)"),
 }
-TOL_NONE, TOL_PERCENT, TOL_ABSOLUTE, TOL_RANGE = "NONE", "PCT", "ABS", "RANGE"
-TOLERANCE_LABELS = {
-    TOL_NONE: N_("None"),
-    TOL_PERCENT: N_("Nominal ± percent"),
-    TOL_ABSOLUTE: N_("Nominal ± absolute"),
-    TOL_RANGE: N_("Range minimum … maximum"),
-}
+# Confidence level for the measurement uncertainty (two-sided, Student t).
+CONFIDENCE_LEVELS = [(68.27, N_("68.3 % (1 σ)")), (95.0, N_("95 %")), (99.0, N_("99 %"))]
+CONFIDENCE_DEFAULT = 68.27
+SIGNAL_FREQUENCY_DEFAULT = 50.0    # Hz, for the AC accuracy specification
 
 
 @dataclass(frozen=True)
@@ -158,6 +152,33 @@ FUNCTIONS: dict[str, Function] = {f.key: f for f in [
 
 FUNCTION_DEFAULT = "VOLT:DC"
 
+# Functions grouped by measured quantity, in display order (selection list, live keys).
+FUNCTION_GROUPS = [
+    (N_("Voltage"), ("VOLT:DC", "VOLT:AC", "VOLT:DC:RAT")),
+    (N_("Current"), ("CURR:DC", "CURR:AC")),
+    (N_("Resistance"), ("RES", "FRES")),
+    (N_("Frequency & time"), ("FREQ", "PER")),
+    (N_("Test functions"), ("CONT", "DIOD")),
+]
+FUNCTION_ORDER = [key for _, keys in FUNCTION_GROUPS for key in keys]
+
+
+def is_loggable(config: "DeviceConfig") -> bool:
+    """Continuity and diode test are front-panel modes: the instrument decides by its own
+    threshold and beeps. They are not logged in the measurement plan, only switched to
+    ("Switch instrument to this mode") or watched in live mode."""
+    return config.func.kind != "fixed"
+
+
+def not_loggable_text(configs) -> str:
+    """Explanation for the plan summary; '' if every configuration can be logged."""
+    names = list(dict.fromkeys(tr(c.func.label) for c in configs if not is_loggable(c)))
+    if not names:
+        return ""
+    return tr("⚠ {functions}: not logged in the measurement plan. Use \"Switch instrument to "
+              "this mode\" (front panel with beeper) or the live mode. To log a resistance, "
+              "choose resistance 2-wire or 4-wire.", functions=", ".join(names))
+
 
 def digits_text(digits: int) -> str:
     return tr("{n}½ digits", n=digits)
@@ -193,12 +214,10 @@ class DeviceConfig:
     conv_offset: float = 0.0
     conv_unit: str = ""
     conv_length: float = 1.0           # metres, for CONV_PER_LENGTH
-    tolerance: str = TOL_NONE
-    tol_nominal: float = 0.0
-    tol_value: float = 1.0             # percent or absolute
-    tol_low: float = 0.0
-    tol_high: float = 1.0
-    moving_average: int = 0            # 0 = off; plot overlay
+    uncertainty: bool = True           # calculate the measurement uncertainty u
+    confidence: float = CONFIDENCE_DEFAULT   # % (two-sided)
+    spec_period: str = "1y"            # accuracy specification: 24h / 90d / 1y
+    signal_frequency: float = SIGNAL_FREQUENCY_DEFAULT  # Hz, AC functions
 
     @property
     def func(self) -> Function:
@@ -209,10 +228,15 @@ class DeviceConfig:
 
     @classmethod
     def from_dict(cls, data: dict) -> "DeviceConfig":
+        # Unknown keys (settings of removed features, e.g. the tolerance check) are ignored.
         known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
         config = cls(**known)
         if config.function not in FUNCTIONS:
             config.function = FUNCTION_DEFAULT
+        if config.conversion not in CONVERSION_LABELS:  # e.g. the removed Pt100 conversion
+            config.conversion = CONV_NONE
+        if config.confidence not in [level for level, _ in CONFIDENCE_LEVELS]:
+            config.confidence = CONFIDENCE_DEFAULT
         return config
 
     # ---------------------------------------------------- derived properties
@@ -296,23 +320,16 @@ class DeviceConfig:
                                        f"{self.conv_unit}")
             if self.conversion == CONV_PER_LENGTH:
                 items[tr("Cable length")] = f"{self.conv_length:g} m"
-        if self.tolerance != TOL_NONE:
-            items[tr("Tolerance")] = self.tolerance_text()
+        from .specs import SPEC_PERIODS
+        if not self.uncertainty:
+            items[tr("Measurement uncertainty")] = tr("not calculated")
+            return items
+        items[tr("Confidence level")] = tr(dict(CONFIDENCE_LEVELS)[self.confidence])
+        items[tr("Accuracy specification")] = tr(dict(SPEC_PERIODS).get(
+            self.spec_period, SPEC_PERIODS[-1][1]))
+        if self.func.kind == "ac":
+            items[tr("Signal frequency")] = f"{self.signal_frequency:g} Hz"
         return items
-
-    def tolerance_text(self) -> str:
-        unit = self.tolerance_unit()
-        if self.tolerance == TOL_PERCENT:
-            return f"{self.tol_nominal:g} {unit} ± {self.tol_value:g} %"
-        if self.tolerance == TOL_ABSOLUTE:
-            return f"{self.tol_nominal:g} ± {self.tol_value:g} {unit}"
-        if self.tolerance == TOL_RANGE:
-            return f"{self.tol_low:g} … {self.tol_high:g} {unit}"
-        return ""
-
-    def tolerance_unit(self) -> str:
-        from .analysis import derived_unit
-        return derived_unit(self) or self.unit
 
 
 def _lookup(table, key):
@@ -349,10 +366,8 @@ def validate(config: DeviceConfig) -> list[str]:
         problems.append(tr("Trigger delay: 0 … 3600 s."))
     if config.conversion == CONV_PER_LENGTH and config.conv_length <= 0:
         problems.append(tr("The cable length must be greater than 0."))
-    if config.conversion in (CONV_PT100, CONV_PT1000) and func.key not in ("RES", "FRES"):
-        problems.append(tr("Pt100/Pt1000 requires a resistance measurement."))
-    if config.tolerance == TOL_RANGE and config.tol_low > config.tol_high:
-        problems.append(tr("Tolerance: minimum is greater than maximum."))
+    if func.kind == "ac" and not 3 <= config.signal_frequency <= 300e3:
+        problems.append(tr("Signal frequency: 3 Hz … 300 kHz."))
     return problems
 
 
@@ -421,7 +436,9 @@ def configuration_commands(config: DeviceConfig) -> list[str]:
     else:
         cmds.append("CALC:STAT OFF")
 
-    cmds.append("DISP ON" if config.display_on else "DISP OFF")
+    # Front-panel modes (continuity, diode) always need the display.
+    display = config.display_on or config.func.kind == "fixed"
+    cmds.append("DISP ON" if display else "DISP OFF")
     cmds.append(f"SYST:BEEP:STAT {'ON' if config.beeper_on else 'OFF'}")
     return cmds
 

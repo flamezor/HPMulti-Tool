@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QMainWindow, QMessageB
 from .. import APP_NAME
 from ..acquisition import set_mode_only
 from ..export import DeviceRecord, LiveCsvWriter, MeasurementRecord, write_csv, write_txt
-from ..functions import DeviceConfig, validate
+from ..functions import DeviceConfig, is_loggable, not_loggable_text, validate
 from ..i18n import language, tr
 from ..instrument import DeviceInfo, discover
 from ..paths import autosave_dir
@@ -265,6 +265,8 @@ class MainWindow(QMainWindow):
     def _live_running_changed(self, running: bool):
         self._set_running(running)
         self.plan_card.set_stop_enabled(False)
+        if not running:
+            self._update_plan_info()  # live changes were taken over into the settings
 
     def _live_record_ready(self, record):
         self.runner.record = record
@@ -322,6 +324,7 @@ class MainWindow(QMainWindow):
             panel = DeviceSettingsPanel(self._load_config(info))
             panel.set_loop_mode(loop)
             panel.changed.connect(self._update_plan_info)
+            panel.changed.connect(self._update_start_enabled)
             panel.apply_mode_requested.connect(lambda i=info: self.apply_mode(i))
             self.panels[info.port] = panel
             self.settings_tabs.addTab(panel, info.label)
@@ -450,8 +453,10 @@ class MainWindow(QMainWindow):
             panel.set_loop_mode(loop)
 
     def _update_start_enabled(self):
-        self.plan_card.set_start_enabled(not self.runner.busy
-                                         and bool(self.devices_card.checked_rows()))
+        selected = self.selected_devices()
+        self.plan_card.set_start_enabled(
+            not self.runner.busy and bool(selected)
+            and all(is_loggable(config) for _, config in selected))
 
     def _update_plan_info(self):
         self.plan_card.update_info([config for _, config in self.selected_devices()])
@@ -485,6 +490,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, tr(
                 "Two selected instruments have the same ID. Please assign unique IDs in the "
                 "advanced settings."))
+            return
+        blocked = not_loggable_text([config for _, config in selected])
+        if blocked:
+            QMessageBox.information(self, APP_NAME, blocked.lstrip("⚠ "))
             return
         plan = self.plan_card.plan()
         if plan.stability is not None and plan.duration == 0:
@@ -567,6 +576,7 @@ class MainWindow(QMainWindow):
         self.profile_card.set_current(str(profile.get("name", "")))
         self._loop_mode_changed(self.plan_card.is_loop())
         self._update_plan_info()
+        self._update_start_enabled()
         self.log_message(tr("Test profile \"{name}\" loaded.", name=self.current_profile))
 
     # ================================================================ export

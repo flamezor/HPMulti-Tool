@@ -46,11 +46,23 @@ recommended below approx. 1 kΩ</td></tr>
 <tr><td><b>Frequency / period</b></td><td>3 Hz … 300 kHz; the range is the input voltage
 range</td></tr>
 <tr><td><b>Voltage ratio</b></td><td>DC input / DC reference on the sense terminals</td></tr>
-<tr><td><b>Continuity / diode</b></td><td>fixed ranges; usually used on the instrument
-itself</td></tr>
+<tr><td><b>Continuity / diode</b></td><td>fixed ranges (1 kΩ / 1 V, 1 mA test current);
+front-panel modes, not logged</td></tr>
 </table>
-<p><b>Without data logging:</b> <i>Switch instrument to this mode</i> configures the instrument and
-returns it to its front panel – e.g. for continuity testing with the beeper.</p>
+<h3>Continuity and diode test</h3>
+<p>Both are used directly on the instrument: it compares each reading with its own threshold
+and beeps – continuity below the threshold (factory setting 10 Ω, adjustable from 1 to 1000 Ω
+only on the front panel: Shift › Menu Recall › 2: CONTINUITY), diode test at 0.3 … 0.8 V. The
+continuity tone cannot be switched off.</p>
+<ul>
+<li><i>Switch instrument to this mode</i> (settings, card <i>Without data logging</i>) configures
+the instrument and returns it to its front panel – the normal way to test with the beeper.</li>
+<li>In the <b>live mode</b> (keys CONT and DIODE) the readings can also be watched on the PC.</li>
+<li>The measurement plan does not log them: the tool cannot read the threshold, so the readings
+alone say nothing about pass or fail. To document resistances, e.g. the cores of a cable, use
+<i>resistance 2-wire</i> or <i>4-wire</i> – with selectable range, 6½ digits and a measurement
+uncertainty.</li>
+</ul>
 <p>The front/rear terminal switch and the continuity threshold cannot be set remotely; the tool
 only shows the terminal setting.</p>"""),
         ("Range & resolution", """
@@ -94,20 +106,128 @@ the tool marks them as BELOW/ABOVE LIMIT.</li>
 </ul>"""),
         ("Evaluation on the PC", """
 <h2>Evaluation (on the PC)</h2>
-<p>Calculated by the tool for every reading. The original reading is always kept and exported as
-well.</p>
+<p>Every measurement scatters a little: noise, contact resistance and the instrument itself make
+each reading slightly different. A single reading therefore says little about how exact it is.
+For every series of readings (per instrument and measured object) the tool calculates the
+<b>measurement result</b> – the best value <i>and</i> how reliable it is:</p>
+<p align="center" style="font-size:13pt"><b>x̄ ± u</b> &nbsp; e.g. &nbsp;
+<b>(5.00220 ± 0.00031) V</b> &nbsp; (68.3 %)</p>
+<p>Read as: the best value is 5.00220 V; the true value lies between 5.00189 V and 5.00251 V with
+a probability of about 68 %. The original readings are always kept and exported as well.</p>
+
+<h3>Step by step</h3>
+<p>The example uses five readings of a DC voltage in the 10 V range:
+5.0021 · 5.0023 · 5.0022 · 5.0024 · 5.0020 V.</p>
+<table border="1" cellspacing="0" cellpadding="6">
+<tr><th>Quantity</th><th>Formula</th><th>What it tells you</th><th>Example</th></tr>
+<tr><td><b>Mean</b> x̄</td><td>x̄ = (x<sub>1</sub> + x<sub>2</sub> + … + x<sub>n</sub>) / n</td>
+<td>The best estimate of the true value. Random deviations up and down cancel out.</td>
+<td>5.0022 V</td></tr>
+<tr><td><b>Standard deviation</b> s</td>
+<td>s = √( Σ (x<sub>i</sub> − x̄)² / (n − 1) )</td>
+<td>How much a <i>single</i> reading scatters around the mean. It hardly changes with more
+readings – it describes the measurement setup.</td><td>0.16 mV</td></tr>
+<tr><td><b>Standard deviation of the mean</b> s(x̄)</td><td>s(x̄) = s / √n</td>
+<td>How exactly the <i>mean</i> is known. It decreases with more readings: four times as many
+readings halve it.</td><td>0.071 mV</td></tr>
+<tr><td><b>Student factor</b> t</td><td>from the t-distribution for n − 1 degrees of freedom
+and the confidence level</td>
+<td>Short series estimate the scatter less reliably. t widens the interval to make up for it;
+for many readings t approaches 1 (68.3 %) or 2 (95 %).</td><td>1.14 (n = 5, 68.3 %)</td></tr>
+<tr><td><b>Random part</b></td><td>t · s(x̄)</td>
+<td>The part of the uncertainty caused by the scatter of the readings.</td><td>0.081 mV</td></tr>
+<tr><td><b>Instrument error</b> h</td><td>h = (% of reading · |x̄| + % of range · range) / 100</td>
+<td>How far the multimeter itself may be off, according to its data sheet. The scatter cannot
+reveal this error – every reading is off in the same way.</td>
+<td>0.0035 % · 5 V + 0.0005 % · 10 V = 0.23 mV</td></tr>
+<tr><td><b>Uncertainty</b> u</td><td>u = t · s(x̄) + h</td>
+<td>Both parts added: the range in which the true value lies.</td><td>0.31 mV</td></tr>
+<tr><td><b>Relative uncertainty</b></td><td>u / |x̄| · 100 %</td>
+<td>The uncertainty in percent of the result – handy for comparing measurements.</td>
+<td>0.0061 %</td></tr>
+</table>
+
+<h3>Rounding</h3>
+<p>u is rounded to <b>two significant digits</b>, and x̄ is rounded to the same decimal place.
+More digits would only pretend an accuracy that does not exist. Example: (83.62 ± 2.624) Ω becomes
+<b>(83.6 ± 2.6) Ω</b>. A 5 in the last place is rounded to the even digit (4.135 → 4.14,
+4.125 → 4.12), so rounding up and down even out.</p>
+
+<h3>Confidence level</h3>
+<p>The confidence level states how probable it is that the true value lies within x̄ ± u. Choose it
+per instrument under <i>Evaluation (on the PC)</i>:</p>
+<table border="1" cellspacing="0" cellpadding="5">
+<tr><th>Level</th><th>Typical use</th><th>t for n = 4 / 5 / 10 / 30 / 100</th></tr>
+<tr><td>68.3 % (1 σ)</td><td>physics lab courses, quick comparisons</td>
+<td>1.20 / 1.14 / 1.06 / 1.02 / 1.01</td></tr>
+<tr><td>95 %</td><td>test reports, calibration certificates, industry</td>
+<td>3.18 / 2.78 / 2.26 / 2.05 / 1.98</td></tr>
+<tr><td>99 %</td><td>safety-relevant statements</td><td>5.84 / 4.60 / 3.25 / 2.76 / 2.63</td></tr>
+</table>
+<p>A higher level makes the interval wider (95 % in the example: (5.00220 ± 0.00042) V). It does
+not make the measurement better – it only makes the statement more certain.</p>
+
+<h3>Instrument error h</h3>
+<p>The values come from the accuracy tables of the 34401A user's guide (chapter 8). They depend on
+the function, the range and the reading, and on the <b>time since the last calibration</b>
+(24 hours, 90 days or 1 year – select this per instrument). The settings are taken into account:</p>
 <ul>
-<li><b>Linear conversion</b> y = factor · x + offset with your own unit, e.g. a 4–20 mA pressure
-transmitter: factor 625, offset −2.5, unit bar.</li>
-<li><b>Per length</b>: resistance ÷ cable length → Ω/m, useful for cable tests.</li>
-<li><b>Pt100 / Pt1000</b>: temperature in °C from a resistance reading (IEC 60751).</li>
-<li><b>Tolerance check</b>: nominal ± % or ± absolute, or a min…max range. Every reading gets
-PASS/FAIL; the summary shows the result per object. With a conversion, the tolerance applies to
-the converted value.</li>
-<li><b>Moving average</b>: an additional smoothed line in the chart.</li>
-<li><b>Statistics</b> (always): minimum, maximum, mean, standard deviation σ, peak-to-peak and
-drift per minute (slope of a linear fit).</li>
-</ul>"""),
+<li>less than 6½ digits: additional noise error;</li>
+<li>2-wire resistance without null: +0.2 Ω for the test leads;</li>
+<li>autozero off: small additional error;</li>
+<li>AC voltage and current: the error depends on the <b>signal frequency</b> (enter it, default
+50 Hz) and on the AC filter; signals below 5 % of the range get an additional error;</li>
+<li>frequency and period: the error depends on the gate time.</li>
+</ul>
+<p>The field below the settings shows h for the last (or an example) reading, with the reasons.</p>
+<p><b>Which time since calibration?</b> The data sheet gives every accuracy in three columns. The
+instrument drifts slowly after its calibration, so the permitted error grows with time:</p>
+<table>
+<tr><th>Setting</th><th>Meaning</th></tr>
+<tr><td>24 hours (23 °C ± 1 °C)</td><td>directly after calibration, in a temperature-controlled
+lab – only for special cases</td></tr>
+<tr><td>90 days (23 °C ± 5 °C)</td><td>calibrated within the last three months</td></tr>
+<tr><td>1 year (23 °C ± 5 °C)</td><td><b>normal case</b>: instrument with a yearly
+calibration</td></tr>
+</table>
+<p>Example 1 kΩ range, 1 year: ± (0.010 % of the reading + 0.001 % of the range); at 108.6446 Ω
+that is 10.9 mΩ + 10 mΩ ≈ <b>21 mΩ</b>. The tool does not know the calibration date of the
+instrument – choose the column that matches your calibration interval.</p>
+<p><b>Limits:</b> the data sheet applies at 18 … 28 °C after one hour of warm-up. With autorange the
+smallest range that holds the value is assumed (on the safe side). For dB/dBm and the voltage
+ratio the data sheet gives no simple value; u then contains only the random part and a note says
+so.</p>
+
+<h3>How many readings?</h3>
+<p>A standard deviation needs at least <b>4 readings</b>. With fewer readings the result is marked
+<i>not valid</i>, and u contains only the instrument error h (as for a single reading). The plan
+summary warns before the start when a measurement will deliver fewer than 4 readings.</p>
+<p>More readings make the random part smaller, but never h. Once t · s(x̄) is small compared with
+h, further readings hardly improve the result – in the example h dominates already with five
+readings. Readings with overload or errors are not used and are counted separately.</p>
+
+<h3>Conversion</h3>
+<ul>
+<li><b>Linear</b>: y = factor · x + offset with your own unit, e.g. a 4–20 mA pressure
+transmitter for 0–10 bar: factor 625, offset −2.5, unit bar.</li>
+<li><b>Per length</b>: reading ÷ cable length, e.g. Ω/m for cable tests.</li>
+</ul>
+<p>The result is converted as well, and u is multiplied by the factor:
+(12.000 ± 0.019) mA → (5.000 ± 0.012) bar. The uncertainty of the sensor or of the cable length
+is not known to the tool and is not included.</p>
+
+<h3>Where to find it</h3>
+<ul>
+<li><b>Readout tile</b>: x̄ ± u while measuring, plus s, h, min, max and n.</li>
+<li><b>Overview</b> tab: one line per instrument and object with all intermediate values.</li>
+<li><b>TXT report</b>: the complete calculation for every instrument, including the notes.</li>
+</ul>
+
+<h3>Without measurement uncertainty</h3>
+<p>If only the readings and their statistics are of interest, switch off <i>Calculate measurement
+uncertainty</i>. Then only the mean x̄, the standard deviation s, s(x̄), minimum and maximum are
+calculated; t, h and u are left out of the tile, the overview and the export, and the warning
+about too few readings disappears. Conversion still works.</p>"""),
         ("Trigger & averaging", """
 <h2>Trigger & averaging</h2>
 <p><b>Trigger</b> = what starts a reading:</p>
@@ -141,15 +261,14 @@ yellow).</li>
 <i>Skip</i> leaves an object out, <i>End series</i> finishes early.</li>
 <li>Alternatively <i>Automatically after a pause</i>: the next step starts after the pause.</li>
 </ol>
-<p>The <b>Summary</b> tab lists one line per object with mean, min, max, σ and PASS/FAIL. The TXT
-report starts with the same table.</p>
+<p>The <b>Overview</b> tab lists one line per object with n, x̄, s, s(x̄), t, h, u and the result
+x̄ ± u. The TXT report starts with the same table.</p>
 <h3>Measure until stable</h3>
 <p>Instead of a fixed duration, each instrument measures until its readings have settled: the
 spread (max − min) of the last N readings must be within a limit, either in % of the reading or
 as an absolute value. The duration then acts as the maximum time. The mean of the last N readings
-is the <b>final value</b>; with a tolerance check only the final value is judged, and a
-measurement that never became stable counts as FAIL. Typical use: temperature tests, long cables,
-sensors that need time to settle.</p>
+is the <b>final value</b>. Typical use: temperature tests, long cables, sensors that need time to
+settle.</p>
 <p>Example: N = 10, limit 0.01 % at 1 reading per second → stable as soon as ten consecutive
 readings of a 100 Ω conductor differ by less than 10 mΩ.</p>"""),
         ("Live mode", """
@@ -192,10 +311,11 @@ order.</li>
 <h2>Export & files</h2>
 <ul>
 <li><b>CSV</b>: one line per reading – date, time, step, point, ID, label, port, function, range,
-resolution, reading (rounded to the digits), unit, optionally calculated value and verdict,
-status and raw value. Format: German (semicolon, decimal comma – opens directly in German Excel)
+resolution, reading (rounded to the digits), unit, optionally calculated value, status and raw
+value. Format: German (semicolon, decimal comma – opens directly in German Excel)
 or international.</li>
-<li><b>TXT</b>: readable report with all settings, statistics, summary and all readings.</li>
+<li><b>TXT</b>: readable report with all settings, the measurement result x̄ ± u with all
+intermediate values, summary and all readings.</li>
 <li><b>Chart as PNG</b>: saves the current chart (all instruments, time of day on the x axis) as
 an image in double screen resolution.</li>
 <li><b>Autosave</b>: every measurement is written continuously to a CSV file in the autosave
@@ -274,10 +394,25 @@ Leitungswiderstand – empfohlen unter ca. 1 kΩ</td></tr>
 Eingangsspannungsbereich</td></tr>
 <tr><td><b>Spannungsverhältnis</b></td><td>DC-Eingang / DC-Referenz an den
 Sense-Buchsen</td></tr>
-<tr><td><b>Durchgang / Diode</b></td><td>feste Bereiche; meist direkt am Gerät genutzt</td></tr>
+<tr><td><b>Durchgang / Diode</b></td><td>feste Bereiche (1 kΩ / 1 V, Prüfstrom 1 mA);
+Modi für die Frontplatte, werden nicht protokolliert</td></tr>
 </table>
-<p><b>Ohne Messwerterfassung:</b> <i>Gerät in diesen Modus schalten</i> konfiguriert das Gerät und
-gibt es an die Frontplatte zurück – z. B. für die Durchgangsprüfung mit Piepton.</p>
+<h3>Durchgangsprüfung und Diodentest</h3>
+<p>Beide werden direkt am Gerät genutzt: Es vergleicht jeden Messwert mit seiner eigenen Schwelle
+und piept – bei Durchgang unterhalb der Schwelle (ab Werk 10 Ω, einstellbar von 1 bis 1000 Ω nur an
+der Frontplatte: Shift › Menu Recall › 2: CONTINUITY), beim Diodentest bei 0,3 … 0,8 V. Der
+Durchgangston lässt sich nicht abschalten.</p>
+<ul>
+<li><i>Gerät in diesen Modus schalten</i> (Einstellungen, Karte <i>Ohne Messwerterfassung</i>)
+konfiguriert das Gerät und gibt es an die Frontplatte zurück – der normale Weg für die Prüfung
+mit Piepton.</li>
+<li>Im <b>Live-Modus</b> (Tasten CONT und DIODE) lassen sich die Messwerte zusätzlich am PC
+verfolgen.</li>
+<li>Im Messablauf werden sie nicht protokolliert: Das Tool kann die Schwelle nicht auslesen, die
+Messwerte allein sagen also nichts über Durchgang ja/nein. Um Widerstände zu dokumentieren, z. B.
+die Adern eines Kabels, <i>Widerstand 2-Leiter</i> oder <i>4-Leiter</i> verwenden – mit wählbarem
+Bereich, 6½ Digits und Messunsicherheit.</li>
+</ul>
 <p>Front/Rear-Umschalter und Durchgangs-Schwelle sind nicht fernsteuerbar; der Umschalter wird nur
 angezeigt.</p>"""),
         ("Bereich & Auflösung", """
@@ -324,20 +459,133 @@ Piepton); das Tool kennzeichnet sie als UNTER/ÜBER GRENZE.</li>
 </ul>"""),
         ("Auswertung am PC", """
 <h2>Auswertung (am PC)</h2>
-<p>Wird vom Tool für jeden Messwert berechnet. Der Originalmesswert bleibt immer erhalten und wird
-mit exportiert.</p>
+<p>Jede Messung streut ein wenig: Rauschen, Übergangswiderstände und das Messgerät selbst sorgen
+dafür, dass jeder Messwert etwas anders ausfällt. Ein einzelner Messwert sagt deshalb wenig darüber
+aus, wie genau er ist. Für jede Messreihe (je Gerät und Messobjekt) berechnet das Tool daher das
+<b>Messergebnis</b> – den besten Wert <i>und</i> wie verlässlich er ist:</p>
+<p align="center" style="font-size:13pt"><b>x̄ ± u</b> &nbsp; z. B. &nbsp;
+<b>(5,00220 ± 0,00031) V</b> &nbsp; (68,3 %)</p>
+<p>Gelesen: Der beste Wert ist 5,00220 V; der wahre Wert liegt mit etwa 68 % Wahrscheinlichkeit
+zwischen 5,00189 V und 5,00251 V. Die Originalmesswerte bleiben immer erhalten und werden mit
+exportiert.</p>
+
+<h3>Schritt für Schritt</h3>
+<p>Das Beispiel verwendet fünf Messwerte einer Gleichspannung im 10-V-Bereich:
+5,0021 · 5,0023 · 5,0022 · 5,0024 · 5,0020 V.</p>
+<table border="1" cellspacing="0" cellpadding="6">
+<tr><th>Größe</th><th>Formel</th><th>Was sie aussagt</th><th>Beispiel</th></tr>
+<tr><td><b>Mittelwert</b> x̄</td><td>x̄ = (x<sub>1</sub> + x<sub>2</sub> + … + x<sub>n</sub>) / n</td>
+<td>Der beste Schätzwert für den wahren Wert. Zufällige Abweichungen nach oben und unten heben
+sich auf.</td><td>5,0022 V</td></tr>
+<tr><td><b>Standardabweichung</b> s</td>
+<td>s = √( Σ (x<sub>i</sub> − x̄)² / (n − 1) )</td>
+<td>Wie stark ein <i>einzelner</i> Messwert um den Mittelwert streut. Sie ändert sich mit mehr
+Messwerten kaum – sie beschreibt den Messaufbau.</td><td>0,16 mV</td></tr>
+<tr><td><b>Standardabweichung des Mittelwerts</b> s(x̄)</td><td>s(x̄) = s / √n</td>
+<td>Wie genau der <i>Mittelwert</i> bekannt ist. Sie sinkt mit mehr Messwerten: viermal so viele
+Messwerte halbieren sie.</td><td>0,071 mV</td></tr>
+<tr><td><b>Student-Faktor</b> t</td><td>aus der t-Verteilung für n − 1 Freiheitsgrade und das
+Vertrauensniveau</td>
+<td>Kurze Messreihen schätzen die Streuung unsicherer. t vergrößert das Intervall als Ausgleich;
+bei vielen Messwerten geht t gegen 1 (68,3 %) bzw. 2 (95 %).</td><td>1,14 (n = 5, 68,3 %)</td></tr>
+<tr><td><b>Zufälliger Anteil</b></td><td>t · s(x̄)</td>
+<td>Der Teil der Unsicherheit, der von der Streuung der Messwerte kommt.</td><td>0,081 mV</td></tr>
+<tr><td><b>Gerätefehler</b> h</td><td>h = (% vom Messwert · |x̄| + % vom Bereich · Bereich) / 100</td>
+<td>Wie weit das Multimeter selbst laut Datenblatt danebenliegen darf. Die Streuung kann diesen
+Fehler nicht zeigen – jeder Messwert ist gleichermaßen betroffen.</td>
+<td>0,0035 % · 5 V + 0,0005 % · 10 V = 0,23 mV</td></tr>
+<tr><td><b>Messunsicherheit</b> u</td><td>u = t · s(x̄) + h</td>
+<td>Beide Anteile zusammen: der Bereich, in dem der wahre Wert liegt.</td><td>0,31 mV</td></tr>
+<tr><td><b>Relative Unsicherheit</b></td><td>u / |x̄| · 100 %</td>
+<td>Die Unsicherheit in Prozent vom Ergebnis – praktisch, um Messungen zu vergleichen.</td>
+<td>0,0061 %</td></tr>
+</table>
+
+<h3>Rundung</h3>
+<p>u wird auf <b>zwei signifikante Stellen</b> gerundet und x̄ auf dieselbe Dezimalstelle. Mehr
+Stellen würden nur eine Genauigkeit vortäuschen, die es nicht gibt. Beispiel: aus
+(83,62 ± 2,624) Ω wird <b>(83,6 ± 2,6) Ω</b>. Eine 5 an der letzten Stelle wird auf die gerade
+Ziffer gerundet (4,135 → 4,14; 4,125 → 4,12), damit sich Auf- und Abrunden ausgleichen.</p>
+
+<h3>Vertrauensniveau</h3>
+<p>Das Vertrauensniveau gibt an, wie wahrscheinlich der wahre Wert innerhalb von x̄ ± u liegt.
+Es wird je Gerät unter <i>Auswertung (am PC)</i> gewählt:</p>
+<table border="1" cellspacing="0" cellpadding="5">
+<tr><th>Niveau</th><th>Typischer Einsatz</th><th>t bei n = 4 / 5 / 10 / 30 / 100</th></tr>
+<tr><td>68,3 % (1 σ)</td><td>Physik-Praktikum, schnelle Vergleiche</td>
+<td>1,20 / 1,14 / 1,06 / 1,02 / 1,01</td></tr>
+<tr><td>95 %</td><td>Prüfberichte, Kalibrierscheine, Industrie</td>
+<td>3,18 / 2,78 / 2,26 / 2,05 / 1,98</td></tr>
+<tr><td>99 %</td><td>sicherheitsrelevante Aussagen</td><td>5,84 / 4,60 / 3,25 / 2,76 / 2,63</td></tr>
+</table>
+<p>Ein höheres Niveau macht das Intervall breiter (95 % im Beispiel: (5,00220 ± 0,00042) V). Die
+Messung wird dadurch nicht besser – nur die Aussage sicherer.</p>
+
+<h3>Gerätefehler h</h3>
+<p>Die Werte stammen aus den Genauigkeitstabellen im Handbuch des 34401A (Kapitel 8). Sie hängen
+von Funktion, Bereich und Messwert ab sowie von der <b>Zeit seit der letzten Kalibrierung</b>
+(24 Stunden, 90 Tage oder 1 Jahr – je Gerät einstellbar). Die Einstellungen werden
+berücksichtigt:</p>
 <ul>
-<li><b>Lineare Umrechnung</b> y = Faktor · x + Offset mit eigener Einheit, z. B. ein
-4–20-mA-Drucksensor: Faktor 625, Offset −2,5, Einheit bar.</li>
-<li><b>Pro Länge</b>: Widerstand ÷ Leitungslänge → Ω/m, praktisch für Kabelprüfungen.</li>
-<li><b>Pt100 / Pt1000</b>: Temperatur in °C aus einer Widerstandsmessung (IEC 60751).</li>
-<li><b>Toleranzprüfung</b>: Sollwert ± % oder ± absolut oder ein Bereich Min…Max. Jeder Messwert
-bekommt i. O./n. i. O.; die Übersicht zeigt das Ergebnis je Objekt. Mit Umrechnung gilt die
-Toleranz für den umgerechneten Wert.</li>
-<li><b>Gleitender Mittelwert</b>: zusätzliche geglättete Linie im Diagramm.</li>
-<li><b>Statistik</b> (immer): Minimum, Maximum, Mittelwert, Standardabweichung σ, Spannweite und
-Drift pro Minute (Steigung einer Ausgleichsgeraden).</li>
-</ul>"""),
+<li>weniger als 6½ Digits: zusätzlicher Rauschfehler;</li>
+<li>2-Draht-Widerstand ohne Null: +0,2 Ω für die Messleitungen;</li>
+<li>Autozero aus: kleiner Zusatzfehler;</li>
+<li>Wechselspannung und -strom: der Fehler hängt von der <b>Signalfrequenz</b> (eintragen,
+Standard 50 Hz) und vom AC-Filter ab; Signale unter 5 % des Bereichs bekommen einen
+Zusatzfehler;</li>
+<li>Frequenz und Periode: der Fehler hängt von der Gate-Zeit ab.</li>
+</ul>
+<p>Das Feld unter den Einstellungen zeigt h für den letzten Messwert (oder einen Beispielwert) samt
+Begründung.</p>
+<p><b>Welche Zeit seit Kalibrierung?</b> Das Datenblatt nennt jede Genauigkeit in drei Spalten.
+Das Gerät driftet nach der Kalibrierung langsam weg, deshalb wächst der erlaubte Fehler mit der
+Zeit:</p>
+<table>
+<tr><th>Einstellung</th><th>Bedeutung</th></tr>
+<tr><td>24 Stunden (23 °C ± 1 °C)</td><td>direkt nach der Kalibrierung, im klimatisierten Labor –
+nur für Sonderfälle</td></tr>
+<tr><td>90 Tage (23 °C ± 5 °C)</td><td>innerhalb der letzten drei Monate kalibriert</td></tr>
+<tr><td>1 Jahr (23 °C ± 5 °C)</td><td><b>Normalfall</b>: Gerät mit jährlicher Kalibrierung</td></tr>
+</table>
+<p>Beispiel 1-kΩ-Bereich, 1 Jahr: ± (0,010 % vom Messwert + 0,001 % vom Bereich); bei 108,6446 Ω
+sind das 10,9 mΩ + 10 mΩ ≈ <b>21 mΩ</b>. Das Kalibrierdatum des Geräts kennt das Tool nicht – die
+Spalte wählen, die zum Kalibrierintervall passt.</p>
+<p><b>Grenzen:</b> Das Datenblatt gilt bei 18 … 28 °C nach einer Stunde Aufwärmzeit. Bei
+Autorange wird der kleinste Bereich angenommen, in den der Wert passt (auf der sicheren Seite).
+Für dB/dBm und das Spannungsverhältnis nennt das Datenblatt keinen einfachen Wert; u enthält dann
+nur den zufälligen Anteil, ein Hinweis weist darauf hin.</p>
+
+<h3>Wie viele Messwerte?</h3>
+<p>Eine Standardabweichung braucht mindestens <b>4 Messwerte</b>. Bei weniger Werten wird das
+Ergebnis als <i>nicht valide</i> markiert, und u enthält nur den Gerätefehler h (wie bei einer
+Einzelmessung). Die Planungsanzeige warnt schon vor dem Start, wenn eine Messung weniger als
+4 Messwerte liefert.</p>
+<p>Mehr Messwerte verkleinern den zufälligen Anteil, aber nie h. Sobald t · s(x̄) klein gegenüber h
+ist, verbessern weitere Messwerte das Ergebnis kaum noch – im Beispiel überwiegt h schon bei fünf
+Messwerten. Messwerte mit Überlauf oder Fehler werden nicht verwendet und gesondert gezählt.</p>
+
+<h3>Umrechnung</h3>
+<ul>
+<li><b>Linear</b>: y = Faktor · x + Offset mit eigener Einheit, z. B. ein 4–20-mA-Drucksensor für
+0–10 bar: Faktor 625, Offset −2,5, Einheit bar.</li>
+<li><b>Pro Länge</b>: Messwert ÷ Leitungslänge, z. B. Ω/m bei Kabelprüfungen.</li>
+</ul>
+<p>Das Ergebnis wird mit umgerechnet, u wird mit dem Faktor multipliziert:
+(12,000 ± 0,019) mA → (5,000 ± 0,012) bar. Die Unsicherheit des Sensors oder der Leitungslänge kennt
+das Tool nicht; sie ist nicht enthalten.</p>
+
+<h3>Wo finde ich was?</h3>
+<ul>
+<li><b>Anzeigekachel</b>: x̄ ± u während der Messung, dazu s, h, min, max und n.</li>
+<li>Reiter <b>Übersicht</b>: je Gerät und Objekt eine Zeile mit allen Zwischenwerten.</li>
+<li><b>TXT-Protokoll</b>: die vollständige Rechnung je Gerät, einschließlich der Hinweise.</li>
+</ul>
+
+<h3>Ohne Messunsicherheit</h3>
+<p>Wenn nur die Messwerte und ihre Statistik interessieren, <i>Messunsicherheit berechnen</i>
+ausschalten. Dann werden nur Mittelwert x̄, Standardabweichung s, s(x̄), Minimum und Maximum
+berechnet; t, h und u entfallen in Kachel, Übersicht und Export, und die Warnung vor zu wenigen
+Messwerten verschwindet. Die Umrechnung funktioniert weiterhin.</p>"""),
         ("Trigger & Mittelung", """
 <h2>Trigger & Mittelung</h2>
 <p><b>Trigger</b> = was eine Messung auslöst:</p>
@@ -374,14 +622,13 @@ ab.</li>
 <li>Alternativ <i>Automatisch nach Pause</i>: der nächste Schritt startet nach Ablauf der
 Pause.</li>
 </ol>
-<p>Der Reiter <b>Übersicht</b> zeigt je Objekt eine Zeile mit Mittelwert, Min, Max, σ und
-i. O./n. i. O. Das TXT-Protokoll beginnt mit derselben Tabelle.</p>
+<p>Der Reiter <b>Übersicht</b> zeigt je Objekt eine Zeile mit n, x̄, s, s(x̄), t, h, u und dem
+Ergebnis x̄ ± u. Das TXT-Protokoll beginnt mit derselben Tabelle.</p>
 <h3>Messen bis stabil</h3>
 <p>Statt einer festen Dauer misst jedes Gerät, bis sich die Werte beruhigt haben: Die Spannweite
 (Max − Min) der letzten N Messwerte muss innerhalb einer Grenze liegen – in % vom Messwert oder
 absolut. Die Messdauer gilt dann als Höchstdauer. Der Mittelwert der letzten N Messwerte ist der
-<b>Endwert</b>; bei einer Toleranzprüfung wird nur der Endwert bewertet, eine Messung, die nicht
-stabil wurde, gilt als n. i. O. Typisch für Temperaturprüfungen, lange Leitungen und Sensoren mit
+<b>Endwert</b>. Typisch für Temperaturprüfungen, lange Leitungen und Sensoren mit
 Einschwingzeit.</p>
 <p>Beispiel: N = 10, Grenze 0,01 % bei 1 Messwert pro Sekunde → stabil, sobald zehn aufeinander
 folgende Werte eines 100-Ω-Leiters weniger als 10 mΩ auseinanderliegen.</p>"""),
@@ -426,10 +673,10 @@ kopieren.</li>
 <ul>
 <li><b>CSV</b>: eine Zeile je Messwert – Datum, Uhrzeit, Schritt, Messpunkt, Kennung,
 Bezeichnung, Port, Funktion, Bereich, Auflösung, Messwert (auf die Digits gerundet), Einheit,
-optional berechneter Wert und Bewertung, Status und Rohwert. Format: Deutsch (Semikolon,
+optional berechneter Wert, Status und Rohwert. Format: Deutsch (Semikolon,
 Dezimalkomma – öffnet direkt in deutschem Excel) oder international.</li>
-<li><b>TXT</b>: lesbares Protokoll mit allen Einstellungen, Statistik, Übersicht und allen
-Messwerten.</li>
+<li><b>TXT</b>: lesbares Protokoll mit allen Einstellungen, dem Messergebnis x̄ ± u samt allen
+Zwischenwerten, Übersicht und allen Messwerten.</li>
 <li><b>Diagramm als PNG</b>: speichert das aktuelle Diagramm (alle Geräte, Uhrzeit auf der
 x-Achse) als Bild in doppelter Bildschirmauflösung.</li>
 <li><b>Autosave</b>: jede Messung wird fortlaufend als CSV im Autosave-Ordner gespeichert – bei

@@ -18,11 +18,12 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .analysis import derive, verdict
+from .analysis import derive
 from .functions import (DeviceConfig, MATH_LIMIT, MATH_MINMAX, configuration_commands,
                         is_overload, read_timeout)
 from .i18n import tr
-from .instrument import SERIAL_ERRORS, DeviceInfo, InstrumentError, open_instrument
+from .instrument import (SERIAL_ERRORS, DeviceInfo, InstrumentError, ReadCancelled,
+                         open_instrument)
 
 MAX_CONSECUTIVE_ERRORS = 3
 
@@ -35,10 +36,9 @@ class Reading:
     elapsed: float          # seconds since the common start
     value: float | None     # None for overload / error
     raw: str
-    status: str             # OK, OVERLOAD, LOW, HIGH, TIMEOUT, ERROR
+    status: str             # OK, OVERLOAD, LOW, HIGH, TIMEOUT, ERROR, CANCELLED
     samples: int = 1
     derived: float | None = None   # PC-side conversion (analysis.derive)
-    verdict: str = ""              # PASS / FAIL against the tolerance, '' = none
 
 
 @dataclass
@@ -113,7 +113,11 @@ def set_mode_only(info: DeviceInfo, config: DeviceConfig) -> None:
 
 
 def read_point(meter, config: DeviceConfig, slot: int, point: int, t0: float) -> Reading:
-    """Take one reading (READ?, or INIT/*TRG/FETC? for the software trigger)."""
+    """Take one reading (READ?, or INIT/*TRG/FETC? for the software trigger).
+
+    Status CANCELLED means ``meter.cancel()`` aborted the reading (Stop); such a
+    reading is not reported.
+    """
     try:
         if config.trigger_source == "BUS":
             # Software trigger: arm, trigger, then fetch (READ? would deadlock).
@@ -122,14 +126,16 @@ def read_point(meter, config: DeviceConfig, slot: int, point: int, t0: float) ->
             raw = meter.query("FETC?")
         else:
             raw = meter.query("READ?")
-    except TimeoutError:
+    except TimeoutError as error:
         stamp = datetime.now().astimezone()
         try:
+            # Abort the measurement still running in the instrument and drop a late answer,
+            # so it cannot be taken as the answer to the next command.
             meter.device_clear()
         except SERIAL_ERRORS:
             pass
-        return Reading(slot, point, stamp, time.monotonic() - t0, None,
-                       "", "TIMEOUT")
+        status = "CANCELLED" if isinstance(error, ReadCancelled) else "TIMEOUT"
+        return Reading(slot, point, stamp, time.monotonic() - t0, None, "", status)
     stamp = datetime.now().astimezone()
     elapsed = time.monotonic() - t0
     try:
@@ -137,8 +143,7 @@ def read_point(meter, config: DeviceConfig, slot: int, point: int, t0: float) ->
     except ValueError:
         return Reading(slot, point, stamp, elapsed, None, raw, "ERROR")
     if any(is_overload(v) for v in values):
-        return Reading(slot, point, stamp, elapsed, None, raw, "OVERLOAD", len(values),
-                       None, verdict(config, None, None))
+        return Reading(slot, point, stamp, elapsed, None, raw, "OVERLOAD", len(values))
     value = sum(values) / len(values)
     status = "OK"
     if config.math == MATH_LIMIT:
@@ -146,9 +151,8 @@ def read_point(meter, config: DeviceConfig, slot: int, point: int, t0: float) ->
             status = "LOW"
         elif value > config.limit_upper:
             status = "HIGH"
-    derived = derive(config, value)
     return Reading(slot, point, stamp, elapsed, value, raw, status, len(values),
-                   derived, verdict(config, value, derived))
+                   derive(config, value))
 
 
 class _DeviceWorker(threading.Thread):
@@ -161,13 +165,10 @@ class _DeviceWorker(threading.Thread):
         self.meter = None
 
     def interrupt(self):
-        """Abort a READ? that is waiting (e.g. for an external trigger)."""
+        """Abort a reading in progress (long integration time, external trigger)."""
         meter = self.meter
-        if meter is not None and meter.connection is not None:
-            try:
-                meter.connection.cancel_read()
-            except (AttributeError, OSError, ValueError):
-                pass
+        if meter is not None:
+            meter.cancel()
 
     def emit(self, kind, text="", **kwargs):
         self.session.events.put(Event(kind, self.slot, text, **kwargs))
@@ -175,6 +176,8 @@ class _DeviceWorker(threading.Thread):
     def run(self):
         meter = self.meter = open_instrument(self.info)
         session = self.session
+        if session.stop_event.is_set():  # stopped before the thread got here
+            meter.cancel()
         try:
             self.emit("status", tr("Connecting …"))
             meter.connect()
@@ -186,6 +189,7 @@ class _DeviceWorker(threading.Thread):
             self.emit("ready", tr("Ready"))
             session.start_barrier.wait(timeout=60)
             self._measure(meter)
+            meter.clear_cancel()  # the instrument is still connected: read min/max
             if self.config.math == MATH_MINMAX:
                 self._report_minmax(meter)
             self.emit("finished", tr("Done"))
@@ -193,7 +197,10 @@ class _DeviceWorker(threading.Thread):
             self.emit("finished", tr("Cancelled"))
         except SERIAL_ERRORS as error:
             session.start_barrier.abort()
-            self.emit("error", str(error))
+            if session.stop_event.is_set():
+                self.emit("finished", tr("Cancelled"))  # stopped while connecting
+            else:
+                self.emit("error", str(error))
         except Exception as error:  # never let a thread die silently
             session.start_barrier.abort()
             self.emit("error", f"{type(error).__name__}: {error}")
@@ -220,8 +227,8 @@ class _DeviceWorker(threading.Thread):
             if delay > 0 and session.stop_event.wait(delay):
                 break
             reading = self._read_point(meter, point, t0)
-            if session.stop_event.is_set() and reading.status == "TIMEOUT":
-                break  # read was interrupted by Stop
+            if reading.status == "CANCELLED":
+                break  # reading aborted by Stop
             self.emit("reading", reading=reading)
             if window is not None:
                 if reading.value is None:
@@ -300,8 +307,7 @@ class Session:
         self.stop_event.set()
         self.start_barrier.abort()
         for worker in self.workers:
-            if worker.config.trigger_source == "EXT":
-                worker.interrupt()
+            worker.interrupt()
 
     @property
     def running(self) -> bool:

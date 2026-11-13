@@ -11,18 +11,17 @@ from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView, QPla
                                QVBoxLayout, QWidget)
 
 from ..acquisition import Reading
-from ..analysis import moving_average
-from ..export import SUMMARY_HEADERS, MeasurementRecord, summary_rows
+from ..export import (SUMMARY_ALWAYS, SUMMARY_HEADERS, MeasurementRecord, summary_columns,
+                      summary_rows)
 from ..i18n import tr
 from .loop_banner import LoopBanner
 from .plotting import ClockAxis, add_limit_lines, apply_plot_theme, style_plot
-from .readings import FAIL_COLOR, PASS_COLOR, ReadingsModel, ReadoutTile
-from .style import THEMES
+from .readings import WARN_COLOR, ReadingsModel, ReadoutTile
 from .widgets import hint, section_label
 
-# Columns of the overview table: right-aligned numbers, and optional ones hidden when empty.
-SUMMARY_NUMERIC = (3, 4, 5, 6, 7, 8, 9, 10)
-SUMMARY_OPTIONAL = (8, 9, 10)
+# Overview table: columns n … maximum are numbers; the note column is highlighted.
+SUMMARY_NUMERIC = range(3, SUMMARY_ALWAYS + 2)
+SUMMARY_NOTE = len(SUMMARY_HEADERS) - 1
 MAX_SYMBOL_POINTS = 500
 
 
@@ -32,8 +31,6 @@ class ResultsView(QWidget):
         self.theme = theme
         self.tiles: list[ReadoutTile] = []
         self.curves = []
-        self.avg_curves = []
-        self.averages: list[int] = []
         self.plot_data: list[tuple[list, list]] = []
         self._plot_dirty = False
 
@@ -113,8 +110,7 @@ class ResultsView(QWidget):
             self.tiles_layout.addWidget(tile, 1)
 
         self.plot_widget.clear()
-        self.curves, self.avg_curves, self.plot_data = [], [], []
-        self.averages = [config.moving_average for _, config in assignments]
+        self.curves, self.plot_data = [], []
         first = None
         for slot, ((info, config), color) in enumerate(zip(assignments, colors)):
             item = self.plot_widget.addPlot(row=slot, col=0,
@@ -132,16 +128,11 @@ class ResultsView(QWidget):
             add_limit_lines(item, config, self.theme)
             curve = item.plot([], [], pen=pg.mkPen(color, width=2), symbol="o", symbolSize=4,
                               symbolBrush=color, symbolPen=None)
-            avg = None
-            if config.moving_average > 1:
-                avg = item.plot([], [], pen=pg.mkPen(THEMES[self.theme]["text"], width=1.5,
-                                                     style=Qt.DashLine))
             if first is None:
                 first = item
             else:
                 item.setXLink(first)
             self.curves.append(curve)
-            self.avg_curves.append(avg)
             self.plot_data.append(([], []))
 
     def tile(self, slot: int) -> ReadoutTile | None:
@@ -166,12 +157,9 @@ class ResultsView(QWidget):
         if not (self._plot_dirty or force):
             return
         self._plot_dirty = False
-        for slot, (curve, (xs, ys)) in enumerate(zip(self.curves, self.plot_data)):
+        for curve, (xs, ys) in zip(self.curves, self.plot_data):
             curve.setData(xs, ys)
             curve.setSymbol("o" if len(xs) <= MAX_SYMBOL_POINTS else None)
-            avg = self.avg_curves[slot]
-            if avg is not None:
-                avg.setData(xs, moving_average(ys, self.averages[slot]))
 
     # ------------------------------------------------------------------ tables
     def show_record(self, record: MeasurementRecord):
@@ -187,15 +175,15 @@ class ResultsView(QWidget):
             return
         rows = summary_rows(record)
         self.summary_table.setRowCount(len(rows))
-        passed = tr("PASS")
         for r, row in enumerate(rows):
             for c, text in enumerate(row):
                 item = QTableWidgetItem(text)
                 if c in SUMMARY_NUMERIC:
                     item.setTextAlignment(int(Qt.AlignRight | Qt.AlignVCenter))
-                if c == len(row) - 1 and text:
-                    item.setForeground(QColor(PASS_COLOR if text.startswith(passed)
-                                              else FAIL_COLOR))
+                if c == SUMMARY_NOTE and text:
+                    item.setForeground(QColor(WARN_COLOR))
                 self.summary_table.setItem(r, c, item)
-        for column in SUMMARY_OPTIONAL:
-            self.summary_table.setColumnHidden(column, not any(row[column] for row in rows))
+        # Optional columns (uncertainty, calculated result, stability, notes) only when used.
+        keep = set(summary_columns(rows))
+        for column in range(len(SUMMARY_HEADERS)):
+            self.summary_table.setColumnHidden(column, column not in keep)

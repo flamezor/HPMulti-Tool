@@ -6,20 +6,18 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QDoubleSpinBox, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
-from ..analysis import derived_unit
-from ..functions import (AC_FILTERS, AC_RESOLUTIONS, AUTO, AUTOZERO_CHOICES, CONV_LINEAR,
-                         CONV_NONE, CONV_PER_LENGTH, CONVERSION_LABELS, DBM_REFERENCES,
-                         DC_RESOLUTIONS, FUNCTIONS, GATE_TIMES, IMPEDANCE_CHOICES, MATH_DB,
-                         MATH_DBM, MATH_LABELS, MATH_LIMIT, MATH_NONE, MATH_NULL, TOL_ABSOLUTE,
-                         TOL_NONE, TOL_PERCENT, TOL_RANGE, TOLERANCE_LABELS, TRIGGER_SOURCES,
-                         DeviceConfig, active_range, configuration_commands, digits_text,
-                         estimated_reading_time, format_reading, format_value, preview_value,
-                         resolution_step, validate)
+from ..analysis import MIN_READINGS
+from ..functions import (AC_FILTERS, AC_RESOLUTIONS, AUTO, AUTOZERO_CHOICES, CONFIDENCE_LEVELS,
+                         CONV_LINEAR, CONV_NONE, CONV_PER_LENGTH, CONVERSION_LABELS,
+                         DBM_REFERENCES, DC_RESOLUTIONS, FUNCTION_GROUPS, FUNCTIONS, GATE_TIMES,
+                         IMPEDANCE_CHOICES, MATH_DB, MATH_DBM, MATH_LABELS, MATH_LIMIT, MATH_NONE,
+                         MATH_NULL, TRIGGER_SOURCES, DeviceConfig, active_range,
+                         configuration_commands, digits_text, estimated_reading_time,
+                         format_reading, format_value, preview_value, resolution_step, validate)
+from ..specs import SPEC_PERIODS, instrument_error
 from ..i18n import localize_number, tr
 from .widgets import Card, DataCombo, FormRow, hint, muted
 
-FUNCTION_ORDER = ["VOLT:DC", "VOLT:AC", "CURR:DC", "CURR:AC", "RES", "FRES",
-                  "FREQ", "PER", "VOLT:DC:RAT", "CONT", "DIOD"]
 
 
 def _spin(minimum=-1.2e9, maximum=1.2e9, decimals=6, suffix="") -> QDoubleSpinBox:
@@ -29,6 +27,7 @@ def _spin(minimum=-1.2e9, maximum=1.2e9, decimals=6, suffix="") -> QDoubleSpinBo
     box.setSuffix(suffix)
     box.setKeyboardTracking(False)
     box.setButtonSymbols(QDoubleSpinBox.NoButtons)
+    box.setProperty("plain", True)  # see style.py: keeps the text field visible
     return box
 
 
@@ -63,7 +62,9 @@ class DeviceSettingsPanel(QScrollArea):
         # --- function ---------------------------------------------------
         card = Card(tr("Measurement function"))
         self.function = DataCombo()
-        self.function.set_items([(k, tr(FUNCTIONS[k].label)) for k in FUNCTION_ORDER])
+        self.function.set_grouped_items(
+            [(tr(heading), [(k, tr(FUNCTIONS[k].label)) for k in keys])
+             for heading, keys in FUNCTION_GROUPS])
         self.function_hint = hint("")
         self.label_edit = QLineEdit()
         self.label_edit.setPlaceholderText(tr("optional, e.g. \"Red 1\" – appears in the export"))
@@ -75,6 +76,7 @@ class DeviceSettingsPanel(QScrollArea):
         card.body.addWidget(self.row_label)
         card.body.addWidget(self.loop_label_hint)
         root.addWidget(card)
+        self._root = root
 
         # --- range / resolution ------------------------------------------
         card = Card(tr("Range & resolution"))
@@ -104,6 +106,7 @@ class DeviceSettingsPanel(QScrollArea):
         # --- instrument math -------------------------------------------------
         card = Card(tr("Math function (in the instrument)"),
                     tr("Calculated inside the multimeter; the instrument returns the result."))
+        self.card_math = card
         self.math = DataCombo()
         card.body.addWidget(FormRow(tr("Function"), self.math))
         self.null_auto = QCheckBox(tr("First reading becomes the null value"))
@@ -133,8 +136,10 @@ class DeviceSettingsPanel(QScrollArea):
 
         # --- PC evaluation ---------------------------------------------------
         card = Card(tr("Evaluation (on the PC)"),
-                    tr("Calculated on the PC for every reading and shown and exported in "
-                       "addition. The original reading is kept."))
+                    tr("Measurement result (mean and scatter, optionally with uncertainty) for "
+                       "every series, and an optional conversion of each reading. The original "
+                       "readings are kept."))
+        self.card_evaluation = card
         self.conversion = DataCombo()
         self.conversion.set_items([(k, tr(v)) for k, v in CONVERSION_LABELS.items()])
         card.body.addWidget(FormRow(tr("Conversion"), self.conversion))
@@ -155,32 +160,43 @@ class DeviceSettingsPanel(QScrollArea):
         card.body.addWidget(self.row_linear)
         card.body.addWidget(self.row_length)
 
-        self.tolerance = DataCombo()
-        self.tolerance.set_items([(k, tr(v)) for k, v in TOLERANCE_LABELS.items()])
-        card.body.addWidget(FormRow(tr("Tolerance check (pass / fail)"), self.tolerance))
-        self.tol_nominal = _spin()
-        self.tol_value = _spin(0, 1e9, 6)
-        self.row_tol_nominal = _pair(FormRow(tr("Nominal value"), self.tol_nominal),
-                                     FormRow(tr("Tolerance"), self.tol_value))
-        self.tol_low = _spin()
-        self.tol_high = _spin()
-        self.row_tol_range = _pair(FormRow(tr("Minimum"), self.tol_low),
-                                   FormRow(tr("Maximum"), self.tol_high))
-        card.body.addWidget(self.row_tol_nominal)
-        card.body.addWidget(self.row_tol_range)
-        self.moving = QSpinBox()
-        self.moving.setRange(0, 1000)
-        self.moving.setSpecialValueText(tr("off"))
-        card.body.addWidget(FormRow(tr("Moving average in the chart (number of values)"),
-                                    self.moving))
-        card.body.addWidget(muted(tr("Statistics (min, max, mean, σ, peak-to-peak, drift per "
-                                     "minute) are always calculated.")))
+        self.uncertainty = QCheckBox(tr("Calculate measurement uncertainty"))
+        self.uncertainty.setToolTip(tr("Off: only mean, standard deviation, minimum and maximum "
+                                       "are calculated."))
+        card.body.addWidget(self.uncertainty)
+        self.uncertainty_box = QWidget()
+        box = QVBoxLayout(self.uncertainty_box)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(8)
+        self.confidence = DataCombo()
+        self.confidence.set_items([(level, tr(text)) for level, text in CONFIDENCE_LEVELS])
+        box.addWidget(FormRow(tr("Confidence level of the uncertainty"), self.confidence))
+        self.spec_period = DataCombo()
+        self.spec_period.set_items([(key, tr(text)) for key, text in SPEC_PERIODS])
+        self.spec_period.setToolTip(tr("Accuracy columns of the data sheet (user's guide, "
+                                       "chapter 8): the longer since calibration, the larger "
+                                       "the permitted error. Normal case: 1 year."))
+        box.addWidget(FormRow(tr("Instrument accuracy (time since calibration)"),
+                              self.spec_period))
+        self.signal_frequency = _spin(3, 300e3, 1, " Hz")
+        self.row_signal_frequency = FormRow(tr("Signal frequency (for the AC accuracy)"),
+                                            self.signal_frequency)
+        box.addWidget(self.row_signal_frequency)
+        self.error_preview = hint("")
+        self.error_preview.setTextFormat(Qt.RichText)
+        box.addWidget(self.error_preview)
+        box.addWidget(muted(tr(
+            "Result x̄ ± u with u = t · s/√n + h: Student factor t, standard deviation s, "
+            "number of readings n and the instrument error h from the data sheet. At least "
+            "{n} readings are needed for a valid result.", n=MIN_READINGS)))
+        card.body.addWidget(self.uncertainty_box)
         root.addWidget(card)
 
         # --- trigger ---------------------------------------------------------
         card = Card(tr("Trigger & averaging"),
                     tr("Trigger = what starts a measurement. Averaging = how many individual "
                        "readings the instrument takes per stored point."))
+        self.card_trigger = card
         self.trigger = DataCombo()
         self.trigger.set_items([(k, tr(v)) for k, v in TRIGGER_SOURCES])
         self.trigger_hint = muted("")
@@ -202,13 +218,16 @@ class DeviceSettingsPanel(QScrollArea):
         # --- instrument ---------------------------------------------------------
         card = Card(tr("Instrument"))
         self.display_on = QCheckBox(tr("Display on during the measurement"))
-        self.beeper_on = QCheckBox(tr("Beeper (e.g. continuity, limit)"))
+        self.beeper_on = QCheckBox(tr("Beeper (limit test, min/max, diode test)"))
+        self.beeper_on.setToolTip(tr("The continuity tone cannot be switched off (manual, "
+                                     "\"Beeper Control\")."))
         card.body.addWidget(self.display_on)
         card.body.addWidget(self.beeper_on)
         root.addWidget(card)
 
         # --- mode only --------------------------------------------------------
         card = Card(tr("Without data logging"))
+        self.card_mode = card
         self.mode_callout = QLabel()
         self.mode_callout.setObjectName("Callout")
         self.mode_callout.setWordWrap(True)
@@ -232,17 +251,16 @@ class DeviceSettingsPanel(QScrollArea):
         self.function.currentIndexChanged.connect(self._function_changed)
         for combo in (self.math, self.range, self.resolution, self.autozero, self.impedance,
                       self.ac_filter, self.dbm_ref, self.trigger, self.conversion,
-                      self.tolerance):
+                      self.confidence, self.spec_period):
             combo.currentIndexChanged.connect(self._edited)
         for box in (self.null_auto, self.db_auto, self.delay_auto, self.display_on,
-                    self.beeper_on):
+                    self.beeper_on, self.uncertainty):
             box.toggled.connect(self._edited)
         for spin in (self.null_value, self.db_value, self.limit_low, self.limit_high,
                      self.delay, self.conv_factor, self.conv_offset, self.conv_length,
-                     self.tol_nominal, self.tol_value, self.tol_low, self.tol_high):
+                     self.signal_frequency):
             spin.valueChanged.connect(self._edited)
         self.samples.valueChanged.connect(self._edited)
-        self.moving.valueChanged.connect(self._edited)
         self.label_edit.textChanged.connect(self._edited)
         self.conv_unit.textChanged.connect(self._edited)
 
@@ -309,12 +327,10 @@ class DeviceSettingsPanel(QScrollArea):
             self.conv_offset.setValue(config.conv_offset)
             self.conv_unit.setText(config.conv_unit)
             self.conv_length.setValue(config.conv_length)
-            self.tolerance.select_data(config.tolerance)
-            self.tol_nominal.setValue(config.tol_nominal)
-            self.tol_value.setValue(config.tol_value)
-            self.tol_low.setValue(config.tol_low)
-            self.tol_high.setValue(config.tol_high)
-            self.moving.setValue(config.moving_average)
+            self.uncertainty.setChecked(config.uncertainty)
+            self.confidence.select_data(config.confidence)
+            self.spec_period.select_data(config.spec_period)
+            self.signal_frequency.setValue(config.signal_frequency)
 
             self.trigger.select_data(config.trigger_source)
             self.delay_auto.setChecked(config.trigger_delay is None)
@@ -355,12 +371,10 @@ class DeviceSettingsPanel(QScrollArea):
         config.conv_offset = self.conv_offset.value()
         config.conv_unit = self.conv_unit.text().strip()
         config.conv_length = self.conv_length.value()
-        config.tolerance = self.tolerance.currentData() or TOL_NONE
-        config.tol_nominal = self.tol_nominal.value()
-        config.tol_value = self.tol_value.value()
-        config.tol_low = self.tol_low.value()
-        config.tol_high = self.tol_high.value()
-        config.moving_average = self.moving.value()
+        config.uncertainty = self.uncertainty.isChecked()
+        config.confidence = self.confidence.currentData() or config.confidence
+        config.spec_period = self.spec_period.currentData() or config.spec_period
+        config.signal_frequency = self.signal_frequency.value()
         config.trigger_source = self.trigger.currentData()
         config.trigger_delay = None if self.delay_auto.isChecked() else self.delay.value()
         config.samples = self.samples.value()
@@ -372,7 +386,9 @@ class DeviceSettingsPanel(QScrollArea):
     def set_last_value(self, value: float | None):
         """Use a real reading for the resolution preview."""
         self._last_value = value
-        self._update_resolution_texts(self.config())
+        config = self.config()
+        self._update_resolution_texts(config)
+        self._update_error_preview(config)
 
     def set_loop_mode(self, enabled: bool):
         self._loop_mode = enabled
@@ -418,13 +434,24 @@ class DeviceSettingsPanel(QScrollArea):
         config = self.config()
         func = config.func
         fixed = func.kind == "fixed"
+        # Continuity / diode test are front-panel modes: only what matters for switching the
+        # instrument is shown, and "Switch instrument to this mode" moves up.
+        self.card_math.setVisible(self.math.count() > 1)
+        self.card_evaluation.setVisible(not fixed)
+        self.card_trigger.setVisible(not fixed)
+        self.speed_label.setVisible(not fixed)
+        self.display_on.setVisible(not fixed)
+        position = 1 if fixed else self._root.count() - 2  # before the stretch
+        if self._root.indexOf(self.card_mode) != position:
+            self._root.removeWidget(self.card_mode)
+            self._root.insertWidget(position, self.card_mode)
         self.row_range.setVisible(not fixed)
         self.row_resolution.setVisible(not fixed)
         self.row_autozero.setVisible(func.autozero)
         self.row_impedance.setVisible(func.impedance)
         self.row_filter.setVisible(func.ac_filter)
-        self.row_label.setVisible(not self._loop_mode)
-        self.loop_label_hint.setVisible(self._loop_mode)
+        self.row_label.setVisible(not self._loop_mode and not fixed)
+        self.loop_label_hint.setVisible(self._loop_mode and not fixed)
         math = config.math
         self.row_null.setVisible(math == MATH_NULL)
         self.null_value.setEnabled(not self.null_auto.isChecked())
@@ -439,14 +466,9 @@ class DeviceSettingsPanel(QScrollArea):
 
         self.row_linear.setVisible(config.conversion == CONV_LINEAR)
         self.row_length.setVisible(config.conversion == CONV_PER_LENGTH)
-        tol = config.tolerance
-        self.row_tol_nominal.setVisible(tol in (TOL_PERCENT, TOL_ABSOLUTE))
-        self.row_tol_range.setVisible(tol == TOL_RANGE)
-        tol_unit = derived_unit(config) or config.unit
-        suffix = f" {tol_unit}" if tol_unit else ""
-        for spin in (self.tol_nominal, self.tol_low, self.tol_high):
-            spin.setSuffix(suffix)
-        self.tol_value.setSuffix(" %" if tol == TOL_PERCENT else suffix)
+        self.uncertainty_box.setVisible(config.uncertainty)
+        self.row_signal_frequency.setVisible(func.kind == "ac")
+        self._update_error_preview(config)
 
         self.trigger_hint.setText({
             "IMM": tr("The tool triggers each reading at the selected interval (normal case)."),
@@ -463,9 +485,10 @@ class DeviceSettingsPanel(QScrollArea):
 
         if fixed:
             self.mode_callout.setText(tr(
-                "<b>{function}</b> is mostly used directly on the instrument. The button below "
-                "switches the instrument to this mode and returns it to the front panel (beeper, "
-                "display on the instrument). Readings can still be logged.",
+                "<b>{function}</b> is used directly on the instrument: it decides by its own "
+                "threshold and beeps. The button below switches the instrument to this mode and "
+                "returns it to the front panel. It is not logged in the measurement plan; in the "
+                "live mode the readings can be watched on the PC.",
                 function=tr(func.label)))
         else:
             self.mode_callout.setText(tr(
@@ -476,6 +499,22 @@ class DeviceSettingsPanel(QScrollArea):
             self.scpi_preview.setText("⚠ " + " ".join(problems))
         else:
             self.scpi_preview.setText("SCPI: " + " · ".join(configuration_commands(config)))
+
+    def _update_error_preview(self, config: DeviceConfig):
+        """Instrument error h for the last (or an example) reading, from the data sheet."""
+        value = preview_value(config, self._last_value)
+        error = instrument_error(config, value)
+        if error is None:
+            self.error_preview.setText(tr("Instrument error h: not specified by the data sheet "
+                                          "for these settings."))
+            return
+        text = tr("Instrument error h at <b>{value}</b>: ± <b>{h}</b>",
+                  value=format_reading(config, value),
+                  h=format_value(error.value, config.unit, significant=2))
+        if error.range is not None:
+            text += " " + tr("({range} range)",
+                             range=format_value(error.range, config.unit, significant=1))
+        self.error_preview.setText("<br>".join([text] + [tr(note) for note in error.notes]))
 
     def set_busy(self, busy: bool):
         self.widget().setEnabled(not busy)

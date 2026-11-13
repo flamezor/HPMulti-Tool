@@ -18,13 +18,12 @@ from .. import APP_NAME
 from ..acquisition import Reading
 from ..analysis import statistics_of
 from ..export import DeviceRecord, LiveCsvWriter, MeasurementRecord, status_text
-from ..functions import (AC_RESOLUTIONS, AUTO, FUNCTIONS, GATE_TIMES, MATH_NONE, MATH_NULL,
-                         DeviceConfig, digits_text, format_reading)
+from ..functions import (AC_RESOLUTIONS, AUTO, FUNCTION_GROUPS, FUNCTIONS, GATE_TIMES, MATH_NONE,
+                         MATH_NULL, DeviceConfig, digits_text, format_reading)
 from ..i18n import N_, localize_number, tr
 from ..instrument import DeviceInfo
 from ..live import LiveSession
 from ..paths import autosave_dir
-from .device_panel import FUNCTION_ORDER
 from .plotting import ClockAxis, apply_plot_theme, style_plot
 from .widgets import DataCombo, hint, muted
 
@@ -114,13 +113,17 @@ class LivePanel(QFrame):
         self.function_keys = QGridLayout()
         self.function_keys.setSpacing(4)
         self.function_group = QButtonGroup(self)
-        for index, key in enumerate(FUNCTION_ORDER):
-            button = _key(FUNCTIONS[key].short)
-            button.setToolTip(tr(FUNCTIONS[key].label))
-            self.function_group.addButton(button)
-            button.clicked.connect(lambda _=False, k=key: self._set_function(k))
-            self.function_keys.addWidget(button, index // 6, index % 6)
-            button.setProperty("function", key)
+        # Two rows by quantity: voltage and current, then resistance, frequency and tests.
+        rows = [FUNCTION_GROUPS[:2], FUNCTION_GROUPS[2:]]
+        for row, groups in enumerate(rows):
+            keys = [key for _, group_keys in groups for key in group_keys]
+            for column, key in enumerate(keys):
+                button = _key(FUNCTIONS[key].short)
+                button.setToolTip(tr(FUNCTIONS[key].label))
+                self.function_group.addButton(button)
+                button.clicked.connect(lambda _=False, k=key: self._set_function(k))
+                self.function_keys.addWidget(button, row, column)
+                button.setProperty("function", key)
         layout.addLayout(self.function_keys)
 
         self.range_label = muted(tr("Range"), wrap=False)

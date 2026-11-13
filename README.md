@@ -15,8 +15,10 @@ German.
   (range, digits/NPLC, autozero, input resistance, AC filter, gate time)
 - Resolution preview: shows how a reading will look for every digits setting
 - Math in the instrument: null, min/max/average, dB, dBm, limit test
-- Evaluation on the PC: linear conversion with custom unit, value per cable length,
-  Pt100/Pt1000 temperature, tolerance check (pass/fail), moving average, drift statistics
+- Evaluation on the PC: measurement result **x̄ ± u** for every series – mean, standard
+  deviation, Student factor t (68.3 / 95 / 99 %) and the instrument error from the 34401A data
+  sheet (24 h / 90 days / 1 year); at least 4 readings for a valid result; can be switched off.
+  Optional linear conversion with custom unit or value per cable length
 - **Measurement series (loop)**: measure several objects one after another, e.g. the cores of a
   cable (red, yellow, black, …), with prompts, repeat and skip, and a summary table
 - **Measure until stable**: each instrument stops when its last N readings are within a limit;
@@ -29,8 +31,9 @@ German.
   every measurement is also autosaved continuously
 - Instruments are identified by an ID stored in the instrument – independent of the COM port;
   the ID can be changed in the advanced settings (with automatic backup)
-- Modes without data logging (e.g. continuity, diode): switch the instrument and hand it back to
-  the front panel
+- Continuity and diode test: switch the instrument to the mode and hand it back to the front
+  panel (beeper), or watch them in live mode; they are not logged in the measurement plan
+- Stop aborts a running reading within fractions of a second
 - Built-in help (F1)
 
 ![Measurement series over the cores of a cable](docs/screenshot-loop.png)
@@ -99,7 +102,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 |---|---|
 | `hpmultitool/instrument.py` | RS-232 driver with DSR handshake, instrument discovery |
 | `hpmultitool/functions.py` | functions, ranges, settings → SCPI commands, formatting |
-| `hpmultitool/analysis.py` | conversion, tolerance, statistics |
+| `hpmultitool/analysis.py` | statistics, Student t, measurement uncertainty, rounding, conversion |
+| `hpmultitool/specs.py` | instrument error h from the accuracy tables of the user's guide |
 | `hpmultitool/acquisition.py` | measurement run, one thread per instrument, common time grid |
 | `hpmultitool/live.py` | live mode: permanent connection, settings changed on the fly |
 | `hpmultitool/series.py` | measurement series (loop): objects distributed over instruments |

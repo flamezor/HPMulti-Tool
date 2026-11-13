@@ -10,8 +10,9 @@ from pathlib import Path
 
 from . import APP_NAME, __version__
 from .acquisition import Reading
-from .analysis import VERDICT_FAIL, VERDICT_PASS, derive, derived_unit, statistics_of, verdict
-from .functions import CONV_NONE, TOL_NONE, DeviceConfig, format_reading, format_value, number_text
+from .analysis import MIN_READINGS, Evaluation, derived_unit, evaluate, result_text
+from .functions import (CONFIDENCE_LEVELS, CONV_NONE, DeviceConfig, format_reading, format_value,
+                        number_text)
 from .i18n import N_, localize_number, tr
 from .instrument import DeviceInfo
 
@@ -24,15 +25,19 @@ CSV_FORMATS = {
 
 STATUS_TEXT = {"OK": N_("OK"), "OVERLOAD": N_("OVERLOAD"), "LOW": N_("BELOW LIMIT"),
                "HIGH": N_("ABOVE LIMIT"), "TIMEOUT": N_("TIMEOUT"), "ERROR": N_("ERROR")}
-VERDICT_TEXT = {VERDICT_PASS: N_("PASS"), VERDICT_FAIL: N_("FAIL"), "": ""}
 
 
 def status_text(status: str) -> str:
     return tr(STATUS_TEXT.get(status, status))
 
 
-def verdict_text(value: str) -> str:
-    return tr(VERDICT_TEXT.get(value, value)) if value else ""
+def confidence_text(confidence: float) -> str:
+    return tr(dict(CONFIDENCE_LEVELS).get(confidence, f"{confidence:g} %"))
+
+
+def quantity_text(value: float | None, unit: str) -> str:
+    """An uncertainty or deviation with two significant digits; '—' if unknown."""
+    return "—" if value is None else format_value(value, unit, significant=2)
 
 
 @dataclass
@@ -51,29 +56,10 @@ class DeviceRecord:
     def values(self) -> list[float]:
         return [r.value for r in self.readings if r.value is not None]
 
-    def stats(self) -> dict:
-        valid = [r for r in self.readings if r.value is not None]
-        return statistics_of([r.value for r in valid], [r.elapsed for r in valid])
-
-    def derived_stats(self) -> dict:
-        valid = [r for r in self.readings if r.derived is not None]
-        return statistics_of([r.derived for r in valid], [r.elapsed for r in valid])
-
-    def verdict(self) -> tuple[str, int]:
-        """Overall PASS/FAIL and number of failed readings ('' without tolerance).
-
-        With "measure until stable" only the final (stable) value counts; a
-        measurement that never became stable fails.
-        """
-        if self.config.tolerance == TOL_NONE or not self.readings:
-            return "", 0
-        if self.stability_used:
-            if self.stable_value is None:
-                return VERDICT_FAIL, 0
-            final = self.stable_value
-            return verdict(self.config, final, derive(self.config, final)), 0
-        failed = sum(1 for r in self.readings if r.verdict == VERDICT_FAIL)
-        return (VERDICT_FAIL if failed else VERDICT_PASS), failed
+    def evaluation(self) -> Evaluation:
+        """Measurement result x̄ ± u of the valid readings (see analysis.evaluate)."""
+        values = self.values()
+        return evaluate(values, self.config, invalid=len(self.readings) - len(values))
 
     @property
     def name(self) -> str:
@@ -101,9 +87,6 @@ class MeasurementRecord:
     def has_conversion(self) -> bool:
         return any(rec.config.conversion != CONV_NONE for rec in self.devices)
 
-    def has_tolerance(self) -> bool:
-        return any(rec.config.tolerance != TOL_NONE for rec in self.devices)
-
 
 def columns(record: MeasurementRecord) -> list[str]:
     cols = [tr("Date"), tr("Time"), tr("Time since start (s)"), tr("Step"),
@@ -111,8 +94,6 @@ def columns(record: MeasurementRecord) -> list[str]:
             tr("Range"), tr("Resolution"), tr("Reading"), tr("Unit")]
     if record.has_conversion():
         cols += [tr("Calculated"), tr("Unit (calculated)")]
-    if record.has_tolerance():
-        cols.append(tr("Verdict"))
     cols += [tr("Status"), tr("Raw value")]
     return cols
 
@@ -139,8 +120,6 @@ def reading_row(record: MeasurementRecord, rec: DeviceRecord, r: Reading,
     ]
     if record.has_conversion():
         row += [_plain(r.derived, decimal, cfg.digits + 1), derived_unit(cfg)]
-    if record.has_tolerance():
-        row.append(verdict_text(r.verdict))
     row += [status_text(r.status), r.raw]
     return row
 
@@ -162,28 +141,40 @@ def _duration_text(record: MeasurementRecord) -> str:
     return localize_number(f"{record.duration:g}") + " s"
 
 
+def evaluation_notes(ev: Evaluation) -> str:
+    """Short hint for the overview: why a result is not (fully) valid."""
+    hints = []
+    if ev.n and not ev.valid:
+        hints.append(tr("n < {n}", n=MIN_READINGS))
+    if ev.n and ev.with_uncertainty and ev.h is None:
+        hints.append(tr("h not specified"))
+    if ev.invalid:
+        hints.append(tr("{n} invalid", n=ev.invalid))
+    return " · ".join(hints)
+
+
 def summary_rows(record: MeasurementRecord) -> list[list[str]]:
-    """One line per device record: step, object, device, mean, min, max, σ, n, derived, verdict."""
+    """One line per device record with the measurement result x̄ ± u (see SUMMARY_HEADERS)."""
     rows = []
     for rec in sorted(record.devices, key=lambda r: (r.step, r.info.label)):
-        cfg, stats = rec.config, rec.stats()
-        verdict, failed = rec.verdict()
-        if stats["count"]:
-            values = [format_reading(cfg, stats["mean"]), format_reading(cfg, stats["min"]),
-                      format_reading(cfg, stats["max"]),
-                      format_value(stats["std"], cfg.unit, significant=3)
-                      if stats["count"] > 1 else "—"]
+        cfg, ev = rec.config, rec.evaluation()
+        unit = cfg.unit
+        if ev.n:
+            relative = (localize_number(f"{ev.relative:.2g}") + " %"
+                        if ev.relative is not None else "—")
+            values = [format_reading(cfg, ev.mean), quantity_text(ev.s, unit),
+                      quantity_text(ev.sem, unit),
+                      localize_number(f"{ev.t:.2f}") if ev.t is not None else "—",
+                      quantity_text(ev.h, unit), quantity_text(ev.u, unit),
+                      result_text(ev.mean, ev.u, unit), relative,
+                      format_reading(cfg, ev.minimum), format_reading(cfg, ev.maximum)]
+            if not ev.with_uncertainty:
+                values[3:8] = [""] * 5   # t, h, u, x̄ ± u, u rel.: switched off
         else:
-            values = ["—"] * 4
-        derived = ""
-        if cfg.conversion != CONV_NONE:
-            dstats = rec.derived_stats()
-            if dstats["count"]:
-                derived = format_value(dstats["mean"], derived_unit(cfg),
-                                       significant=cfg.digits + 1)
-        text = verdict_text(verdict)
-        if failed:
-            text += f" ({failed}/{len(rec.readings)})"
+            values = ["—"] * 10
+        converted = ev.converted(cfg)
+        derived = (result_text(converted.mean, converted.u, derived_unit(cfg))
+                   if converted is not None else "")
         final = after = ""
         if rec.stability_used:
             if rec.stable_value is not None:
@@ -191,14 +182,68 @@ def summary_rows(record: MeasurementRecord) -> list[list[str]]:
                 after = localize_number(f"{rec.stable_after:.1f}") + " s"
             else:
                 after = tr("not stable")
-        rows.append([str(rec.step), cfg.label or "—", rec.info.label, *values,
-                     str(stats["count"]), derived, final, after, text])
+        rows.append([str(rec.step), cfg.label or "—", rec.info.label, str(ev.n), *values,
+                     derived, final, after, evaluation_notes(ev)])
     return rows
 
 
-SUMMARY_HEADERS = [N_("Step"), N_("Label"), N_("Instrument"), N_("Mean"),
-                   N_("Minimum"), N_("Maximum"), N_("σ"), N_("n"), N_("Calculated"),
-                   N_("Final value (stable)"), N_("Stable after"), N_("Verdict")]
+SUMMARY_HEADERS = [N_("Step"), N_("Label"), N_("Instrument"), N_("n"), N_("Mean x̄"),
+                   N_("s"), N_("s(x̄)"), N_("t"), N_("h (instrument)"), N_("u"),
+                   N_("Result x̄ ± u"), N_("u rel."), N_("Minimum"), N_("Maximum"),
+                   N_("Result (calculated)"), N_("Final value (stable)"), N_("Stable after"),
+                   N_("Note")]
+SUMMARY_ALWAYS = 14   # the following columns are left out when empty
+UNCERTAINTY_COLUMNS = range(7, 12)   # t … u rel.: empty when the uncertainty is switched off
+_OPTIONAL_COLUMNS = set(UNCERTAINTY_COLUMNS) | set(range(SUMMARY_ALWAYS, len(SUMMARY_HEADERS)))
+
+
+def summary_columns(rows: list[list[str]]) -> list[int]:
+    """Indices of the summary columns to show: optional columns only when used."""
+    return [i for i in range(len(SUMMARY_HEADERS))
+            if i not in _OPTIONAL_COLUMNS or any(row[i] for row in rows)]
+
+
+def evaluation_lines(rec: DeviceRecord) -> list[tuple[str, str]]:
+    """The measurement result of one record as (label, text) pairs for the report."""
+    cfg, ev = rec.config, rec.evaluation()
+    unit = cfg.unit
+    lines = [(tr("Readings"), tr("{valid} valid, {total} total", valid=ev.n,
+                                  total=len(rec.readings)))]
+    if not ev.n:
+        return lines
+    spread = quantity_text(ev.spread, unit)
+    lines += [
+        (tr("Mean x̄"), format_reading(cfg, ev.mean)),
+        (tr("Minimum / maximum"), f"{format_reading(cfg, ev.minimum)} / "
+                                   f"{format_reading(cfg, ev.maximum)}  ({tr('spread')} {spread})"),
+        (tr("Std. deviation s"), quantity_text(ev.s, unit)),
+        (tr("Std. dev. of mean"), quantity_text(ev.sem, unit)),
+    ]
+    converted = ev.converted(cfg)
+    if not ev.with_uncertainty:
+        lines.append((tr("Uncertainty u"), tr("not calculated (switched off)")))
+        if converted is not None:
+            lines.append((tr("Result (calculated)"),
+                          result_text(converted.mean, None, derived_unit(cfg))))
+        return lines
+    t_text = localize_number(f"{ev.t:.3f}") if ev.t is not None else "—"
+    u_text = quantity_text(ev.u, unit)
+    if ev.relative is not None:
+        u_text += "  (" + localize_number(f"{ev.relative:.2g}") + " %)"
+    lines += [
+        (tr("Student t"), f"{t_text}  ({confidence_text(ev.confidence)}, n = {ev.n})"),
+        (tr("Random part t·s(x̄)"), quantity_text(ev.random, unit)),
+        (tr("Instrument error h"), quantity_text(ev.h, unit)),
+        (tr("Uncertainty u"), u_text),
+        (tr("Result"), result_text(ev.mean, ev.u, unit)
+         + ("" if ev.valid else "  " + tr("(not valid)"))),
+    ]
+    if converted is not None:
+        lines.append((tr("Result (calculated)"),
+                      result_text(converted.mean, converted.u, derived_unit(cfg))))
+    for note in ev.notes:
+        lines.append((tr("Note"), tr(note)))
+    return lines
 
 
 def write_txt(record: MeasurementRecord, path: Path) -> None:
@@ -231,7 +276,7 @@ def write_txt(record: MeasurementRecord, path: Path) -> None:
         out.write(f"\n--- {tr('Summary')} ---\n")
         headers = [tr(h) for h in SUMMARY_HEADERS]
         rows = summary_rows(record)
-        keep = [i for i in range(len(headers)) if i < 8 or any(row[i] for row in rows)]
+        keep = summary_columns(rows)
         widths = [max(len(headers[i]), *(len(row[i]) for row in rows)) for i in keep]
         out.write("  ".join(headers[i].ljust(w) for i, w in zip(keep, widths)).rstrip() + "\n")
         out.write("  ".join("-" * w for w in widths) + "\n")
@@ -249,26 +294,8 @@ def write_txt(record: MeasurementRecord, path: Path) -> None:
             out.write(f"  {tr('Label'):<22}{cfg.label}\n")
         for key, value in cfg.summary().items():
             out.write(f"  {key:<22}{value}\n")
-        stats = rec.stats()
-        counts = tr("{valid} valid, {total} total", valid=stats["count"],
-                    total=len(rec.readings))
-        out.write(f"  {tr('Readings'):<22}{counts}\n")
-        if stats["count"]:
-            for key, name in (("min", N_("Minimum")), ("max", N_("Maximum")), ("mean", N_("Mean"))):
-                out.write(f"  {tr(name):<22}{format_reading(cfg, stats[key])}\n")
-            for key, name in (("std", N_("Standard deviation")), ("pp", N_("Peak-to-peak"))):
-                out.write(f"  {tr(name):<22}{format_value(stats[key], cfg.unit, significant=3)}\n")
-            if "drift" in stats:
-                drift = format_value(stats["drift"], cfg.unit, significant=3)
-                out.write(f"  {tr('Drift'):<22}{drift}/min\n")
-        if cfg.conversion != CONV_NONE:
-            dstats = rec.derived_stats()
-            if dstats["count"]:
-                unit, sig = derived_unit(cfg), cfg.digits + 1
-                out.write(f"  {tr('Calculated mean'):<22}"
-                          f"{format_value(dstats['mean'], unit, significant=sig)}"
-                          f"  (min {format_value(dstats['min'], unit, significant=sig)},"
-                          f" max {format_value(dstats['max'], unit, significant=sig)})\n")
+        for key, value in evaluation_lines(rec):
+            out.write(f"  {key:<22}{value}\n")
         if rec.stability_used:
             if rec.stable_value is not None:
                 after = localize_number(f"{rec.stable_after:.1f}")
@@ -276,10 +303,6 @@ def write_txt(record: MeasurementRecord, path: Path) -> None:
                           f"  ({tr('stable after {s} s', s=after)})\n")
             else:
                 out.write(f"  {tr('Final value (stable)'):<22}{tr('not stable')}\n")
-        verdict, failed = rec.verdict()
-        if verdict:
-            extra = f"  ({failed}/{len(rec.readings)})" if failed else ""
-            out.write(f"  {tr('Verdict'):<22}{verdict_text(verdict)}{extra}\n")
         if rec.instrument_minmax:
             mm = rec.instrument_minmax
             out.write(f"  {tr('Min/max (instrument)'):<22}min {mm.get('min')}, max {mm.get('max')}, "
@@ -287,13 +310,10 @@ def write_txt(record: MeasurementRecord, path: Path) -> None:
 
     out.write(f"\n{line}\n")
     conv = record.has_conversion()
-    tol = record.has_tolerance()
     header = (f"{tr('Date'):<11}{tr('Time'):<13}{tr('t (s)'):>9}  {tr('Step'):>7} "
               f"{tr('Pt'):>5}  {tr('ID'):<10}{tr('Label'):<14}{tr('Reading'):>16}")
     if conv:
         header += f"  {tr('Calculated'):>14}"
-    if tol:
-        header += f"  {tr('Verdict'):<9}"
     header += f"  {tr('Status')}"
     out.write(header + "\n" + "-" * len(header) + "\n")
     for rec, r in record.rows():
@@ -307,8 +327,6 @@ def write_txt(record: MeasurementRecord, path: Path) -> None:
             derived = (format_value(r.derived, derived_unit(cfg), significant=cfg.digits + 1)
                        if r.derived is not None else "")
             text += f"  {derived:>14}"
-        if tol:
-            text += f"  {verdict_text(r.verdict):<9}"
         out.write(text + f"  {status_text(r.status)}\n")
     Path(path).write_text(out.getvalue(), encoding="utf-8")
 

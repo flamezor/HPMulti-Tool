@@ -109,7 +109,7 @@ class MeasurementRunner(QObject):
         if self.session is not None:
             self.session.stop()
             self.plan_card.set_stop_enabled(False)
-            self._log(tr("Stop requested – finishing the current reading …"))
+            self._log(tr("Stop requested – aborting the current reading …"))
         elif self.loop is not None:
             self.end_series()
 
@@ -200,7 +200,7 @@ class MeasurementRunner(QObject):
         if reading.value is not None:
             self.results.add_point(slot, reading)
             self.value_received.emit(rec.info, reading.value)
-        self.results.tile(slot).show_reading(reading, rec.stats())
+        self.results.tile(slot).show_reading(reading, rec.evaluation())
         if reading.status in ("TIMEOUT", "ERROR"):
             self._log(tr("{device}: measurement error ({status}) at point {point}",
                          device=rec.info.label, status=reading.status, point=reading.point),

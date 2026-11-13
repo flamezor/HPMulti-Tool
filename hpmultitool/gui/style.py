@@ -48,6 +48,7 @@ def stylesheet(name: str, checkmark: str = "") -> str:
     #Readout QWidget {{ background: transparent; }}
     #ReadoutValue {{ font-family: {MONO_FONTS}; font-size: 26pt; font-weight: 600; }}
     #ReadoutName {{ font-size: 12pt; font-weight: 700; }}
+    #ReadoutResult {{ font-weight: 600; }}
     #ReadoutObject {{ font-size: 12pt; font-weight: 700; color: {c['text']};
                       background: {c['surface2']}; border-radius: 6px; padding: 1px 8px; }}
     #LoopBanner {{ background: {c['surface']}; border: 2px solid {c['accent']}; border-radius: 12px; }}
@@ -97,9 +98,15 @@ def stylesheet(name: str, checkmark: str = "") -> str:
     QComboBox:focus, QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {c['accent']}; }}
     QComboBox:disabled, QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
         color: {c['muted']}; }}
+    /* Number fields without arrows: without this rule Qt shrinks their text field to 1 px
+       when a style sheet is active, so the value is invisible. */
+    QAbstractSpinBox[plain="true"]::up-button, QAbstractSpinBox[plain="true"]::down-button {{
+        subcontrol-origin: border; width: 0px; border: none; }}
     QComboBox::drop-down {{ border: none; width: 22px; }}
     QComboBox QAbstractItemView {{ background: {c['surface2']}; border: 1px solid {c['border']};
         selection-background-color: {c['accent']}; selection-color: {c['accent_text']}; outline: 0; }}
+    /* group headings in selection lists (DataCombo.set_grouped_items) */
+    QComboBox QAbstractItemView::item:disabled {{ color: {c['accent']}; }}
     QCheckBox, QRadioButton {{ background: transparent; spacing: 8px; }}
     QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 5px;
                             border: 1.5px solid {c['muted']}; background: {c['input']}; }}

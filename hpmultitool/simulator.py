@@ -35,6 +35,8 @@ class _State:
         self.errors = []
 
 
+MAX_READING_TIME = 10.0  # seconds; keeps extreme settings usable in the simulation
+
 # Shared per simulated port, so the state survives reconnects.
 _STATES: dict[str, _State] = {}
 _STATES_LOCK = threading.Lock()
@@ -54,14 +56,21 @@ class _FakeSerial:
         self.is_open = True
         self.dsr = True
         self._out = bytearray()
+        # Answers that are still being measured: (time when ready, bytes).
+        # Like the real instrument, READ? returns at once and the answer
+        # arrives after the integration time.
+        self._pending: list[tuple[float, bytes]] = []
         self._random = random.Random(seed)
         self._t0 = time.monotonic()
 
     # pyserial-like API -------------------------------------------------
     def write(self, data: bytes):
+        if b"\x03" in data:  # device clear: abort the measurement, drop answers
+            self._pending.clear()
+            self._out.clear()
         for line in data.decode("ascii").splitlines():
-            line = line.strip()
-            if line and line != "\x03":
+            line = line.strip().replace("\x03", "")
+            if line:
                 self._handle(line)
         return len(data)
 
@@ -69,27 +78,46 @@ class _FakeSerial:
         pass
 
     def reset_input_buffer(self):
+        self._collect()
         self._out.clear()
 
+    def _collect(self):
+        now = time.monotonic()
+        while self._pending and self._pending[0][0] <= now:
+            self._out.extend(self._pending.pop(0)[1])
+
+    def _wait_for(self, done) -> None:
+        """Wait (up to ``timeout``) until ``done()`` is true for the received bytes."""
+        deadline = time.monotonic() + (self.timeout if self.timeout is not None else 1e9)
+        while True:
+            self._collect()
+            if done() or time.monotonic() >= deadline:
+                return
+            time.sleep(0.005)
+
     def read(self, size=1):
+        self._wait_for(lambda: len(self._out) >= size)
         chunk = bytes(self._out[:size])
         del self._out[:size]
         return chunk
 
-    def readline(self):
-        if b"\n" not in self._out:
-            return b""
-        index = self._out.index(b"\n") + 1
+    def read_until(self, expected=b"\n", size=None):
+        self._wait_for(lambda: expected in self._out)
+        index = self._out.index(expected) + len(expected) if expected in self._out \
+            else len(self._out)
         line = bytes(self._out[:index])
         del self._out[:index]
         return line
+
+    readline = read_until
 
     def close(self):
         self.is_open = False
 
     # command handling ----------------------------------------------------
-    def _reply(self, text: str):
-        self._out.extend(f"{text}\r\n".encode("ascii"))
+    def _reply(self, text: str, delay: float = 0.0):
+        ready = max([time.monotonic() + delay] + [at for at, _ in self._pending])
+        self._pending.append((ready, f"{text}\r\n".encode("ascii")))
 
     def _value(self) -> float:
         s = self.state
@@ -144,8 +172,7 @@ class _FakeSerial:
         elif upper == "*RST":
             s.reset()
         elif upper == "*TST?":
-            time.sleep(0.5)
-            self._reply("+0")
+            self._reply("+0", delay=0.5)
         elif upper.startswith("CONF:"):
             body = upper[5:].split(" ", 1)[0]
             s.function = body if body in _BASE_VALUES else s.function
@@ -169,10 +196,10 @@ class _FakeSerial:
                 integration = 0.02
             else:
                 integration = s.nplc / 50.0
-            time.sleep(min(2.0, s.samples * (integration + 0.01)))
             values = [self._value() for _ in range(s.samples)]
             s.stats.extend(values)
-            self._reply(",".join(f"{v:+.8E}" for v in values))
+            self._reply(",".join(f"{v:+.8E}" for v in values),
+                        delay=min(MAX_READING_TIME, s.samples * (integration + 0.01)))
         elif upper == "CALC:AVER:MIN?":
             self._reply(f"{min(s.stats, default=0):+.8E}")
         elif upper == "CALC:AVER:MAX?":

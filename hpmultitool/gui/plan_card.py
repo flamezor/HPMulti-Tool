@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDoubleSpinBox, QHB
                                QSpinBox, QVBoxLayout, QWidget)
 
 from ..acquisition import Plan, Stability
-from ..functions import DeviceConfig, estimated_reading_time
+from ..analysis import MIN_READINGS
+from ..functions import DeviceConfig, estimated_reading_time, not_loggable_text
 from ..i18n import localize_number, tr
 from ..series import (ADVANCE_AUTO, ADVANCE_CONFIRM, LOOP_TEMPLATES, MODE_LOOP, MODE_SINGLE,
                       step_count)
@@ -247,6 +248,10 @@ class PlanCard(Card):
 
     def update_info(self, configs: list[DeviceConfig]):
         """Summarise the plan for the selected instruments (their configurations)."""
+        blocked = not_loggable_text(configs)
+        if blocked:
+            self.info.setText(blocked)
+            return
         plan = self.plan()
         points = plan.expected_points()
         parts = []
@@ -274,6 +279,11 @@ class PlanCard(Card):
                                steps=step_count(objects, selected)))
             if plan.duration is None:
                 parts.append(tr("⚠ Unlimited: every step runs until stopped"))
+        expected = 1 if plan.duration == 0 else points
+        if (plan.stability is None and expected is not None and expected < MIN_READINGS
+                and any(config.uncertainty for config in configs)):
+            parts.append(tr("⚠ fewer than {n} readings: no valid measurement uncertainty",
+                            n=MIN_READINGS))
         slowest = max((estimated_reading_time(config) for config in configs), default=0)
         if plan.interval > 0 and slowest > plan.interval:
             parts.append(tr("⚠ one reading takes ≈ {s} s – longer than the interval",

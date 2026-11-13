@@ -9,8 +9,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
 
-from ..functions import (CONV_NONE, MATH_LIMIT, TOL_ABSOLUTE, TOL_PERCENT, TOL_RANGE,
-                         DeviceConfig)
+from ..functions import MATH_LIMIT, DeviceConfig
 from .style import THEMES
 
 
@@ -38,18 +37,9 @@ def apply_plot_theme(widget: pg.GraphicsLayoutWidget, theme: str) -> None:
 
 
 def limit_values(config: DeviceConfig) -> list[float]:
-    """Limits to draw in the plot, when they refer to the measured value."""
+    """Limits of the instrument's limit test, drawn in the plot."""
     if config.math == MATH_LIMIT:
         return [config.limit_lower, config.limit_upper]
-    if config.conversion != CONV_NONE:
-        return []
-    if config.tolerance == TOL_PERCENT:
-        d = abs(config.tol_nominal) * config.tol_value / 100
-        return [config.tol_nominal - d, config.tol_nominal + d]
-    if config.tolerance == TOL_ABSOLUTE:
-        return [config.tol_nominal - config.tol_value, config.tol_nominal + config.tol_value]
-    if config.tolerance == TOL_RANGE:
-        return [config.tol_low, config.tol_high]
     return []
 
 

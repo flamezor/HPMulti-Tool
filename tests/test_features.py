@@ -12,40 +12,28 @@ os.environ["APPDATA"] = _TMP
 
 from hpmultitool import i18n  # noqa: E402
 from hpmultitool.acquisition import Reading  # noqa: E402
-from hpmultitool.analysis import (VERDICT_FAIL, VERDICT_PASS, derive, moving_average,  # noqa: E402
-                                  platinum_temperature, statistics_of, verdict)
+from hpmultitool.analysis import derive, statistics_of  # noqa: E402
 from hpmultitool.export import (DeviceRecord, MeasurementRecord, columns, summary_rows,  # noqa: E402
                                 write_csv, write_txt)
 from hpmultitool.functions import DeviceConfig, format_reading, preview_value  # noqa: E402
 from hpmultitool.instrument import DeviceInfo  # noqa: E402
 
 
-class EvaluationTests(unittest.TestCase):
-    def test_platinum(self):
-        self.assertAlmostEqual(platinum_temperature(138.5055, 100), 100.0, places=3)
-        self.assertAlmostEqual(platinum_temperature(80.3063, 100), -50.0, places=3)
-        self.assertAlmostEqual(platinum_temperature(1000.0, 1000), 0.0, places=6)
-
-    def test_linear_and_tolerance(self):
+class ConversionTests(unittest.TestCase):
+    def test_linear(self):
         cfg = DeviceConfig(function="CURR:DC", conversion="LINEAR", conv_factor=625,
-                           conv_offset=-2.5, conv_unit="bar", tolerance="PCT",
-                           tol_nominal=5, tol_value=1)
+                           conv_offset=-2.5, conv_unit="bar")
         self.assertAlmostEqual(derive(cfg, 0.012), 5.0)
-        self.assertEqual(verdict(cfg, 0.012, 5.0), VERDICT_PASS)
-        self.assertEqual(verdict(cfg, 0.013, derive(cfg, 0.013)), VERDICT_FAIL)
-        self.assertEqual(verdict(cfg, None, None), VERDICT_FAIL)
+        self.assertIsNone(derive(cfg, None))
 
-    def test_per_length_and_range(self):
-        cfg = DeviceConfig(function="FRES", conversion="PER_LENGTH", conv_length=2.0,
-                           tolerance="RANGE", tol_low=0.0, tol_high=0.1)
+    def test_per_length(self):
+        cfg = DeviceConfig(function="FRES", conversion="PER_LENGTH", conv_length=2.0)
         self.assertAlmostEqual(derive(cfg, 0.15), 0.075)
-        self.assertEqual(verdict(cfg, 0.15, 0.075), VERDICT_PASS)
 
-    def test_statistics_and_average(self):
-        stats = statistics_of([1, 2, 3, 4], [0, 60, 120, 180])
-        self.assertAlmostEqual(stats["drift"], 1.0)
-        self.assertEqual(stats["pp"], 3)
-        self.assertEqual(moving_average([1, 2, 3, 4], 2), [1, 1.5, 2.5, 3.5])
+    def test_running_statistics(self):
+        stats = statistics_of([1, 2, 3, 4])
+        self.assertEqual((stats["min"], stats["max"], stats["count"]), (1, 4, 4))
+        self.assertAlmostEqual(stats["mean"], 2.5)
 
 
 class LocalisationTests(unittest.TestCase):
@@ -78,27 +66,30 @@ class LoopAndExportTests(unittest.TestCase):
                          [["red", "yellow"], ["black", "white"], ["green"]])
         self.assertIs(steps[2][0][0], a)
 
-    def test_export_with_steps_and_verdict(self):
+    def test_export_with_steps_and_result(self):
         info = DeviceInfo("SIM", identification="HP,34401A,0,1", calibration_message="T034")
         records = []
-        for step, (name, value) in enumerate([("red", 0.10), ("yellow", 0.30)], start=1):
-            cfg = DeviceConfig(function="FRES", label=name, tolerance="RANGE",
-                               tol_low=0, tol_high=0.2)
-            v = verdict(cfg, value, None)
-            reading = Reading(0, 0, datetime.now().astimezone(), 0.1, value,
-                              f"{value:+.8E}", "OK", 1, None, v)
-            records.append(DeviceRecord(info, cfg, [reading], step=step))
+        for step, (name, values) in enumerate([("red", [100.1, 100.3, 100.2, 100.4, 100.0]),
+                                               ("yellow", [99.0, 99.2])], start=1):
+            cfg = DeviceConfig(function="FRES", label=name, range=100)
+            readings = [Reading(0, i, datetime.now().astimezone(), 0.1 * i, v, f"{v:+.8E}",
+                                "OK") for i, v in enumerate(values)]
+            records.append(DeviceRecord(info, cfg, readings, step=step))
         record = MeasurementRecord(records, 1, 0, loop=True)
-        self.assertIn("Verdict", columns(record))
+        self.assertNotIn("Verdict", columns(record))
         rows = summary_rows(record)
         self.assertEqual([r[1] for r in rows], ["red", "yellow"])
-        self.assertEqual([r[-1] for r in rows], ["PASS", "FAIL (1/1)"])
+        self.assertEqual([r[3] for r in rows], ["5", "2"])           # n
+        self.assertTrue(rows[0][10].startswith("(100."))            # result x̄ ± u
+        self.assertEqual(rows[0][-1], "")                           # valid: no note
+        self.assertEqual(rows[1][-1], "n < 4")
         out = Path(_TMP)
         write_csv(record, out / "loop.csv")
         write_txt(record, out / "loop.txt")
         text = (out / "loop.txt").read_text(encoding="utf-8")
         self.assertIn("Summary", text)
-        self.assertIn("yellow", text)
+        self.assertIn("Uncertainty u", text)
+        self.assertIn("(not valid)", text)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,8 @@ def main(argv=None) -> int:
     app.setOrganizationName(APP_NAME)
     app.setDesktopFileName("hpmultitool")
     app.setStyle("Fusion")
+    from .gui.widgets import WheelGuard
+    app.installEventFilter(WheelGuard(app))  # mouse wheel scrolls, never changes values
     settings = QSettings(APP_NAME, APP_NAME)
     set_language(args.lang or settings.value("ui/language") or None)
 

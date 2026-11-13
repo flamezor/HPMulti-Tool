@@ -10,7 +10,8 @@ os.environ["XDG_DATA_HOME"] = _TMP
 os.environ["APPDATA"] = _TMP
 
 from hpmultitool.acquisition import Plan, Session, Stability  # noqa: E402
-from hpmultitool.export import DeviceRecord, MeasurementRecord, summary_rows  # noqa: E402
+from hpmultitool.export import (SUMMARY_HEADERS, DeviceRecord, MeasurementRecord,  # noqa: E402
+                                summary_rows)
 from hpmultitool.functions import DeviceConfig  # noqa: E402
 from hpmultitool.instrument import DeviceInfo, discover  # noqa: E402
 from hpmultitool.profiles import (assign_configs, delete_profile, list_profiles,  # noqa: E402
@@ -52,15 +53,12 @@ class StabilityTests(unittest.TestCase):
         events = self._run(Stability(5, 0.0, False), 0.5)  # zero spread is impossible
         self.assertEqual(sorted(e.slot for e in events if e.kind == "unstable"), [0, 1])
 
-    def test_verdict_uses_final_value(self):
-        info = DeviceInfo("SIM", calibration_message="T034")
-        cfg = DeviceConfig(function="FRES", label="red", tolerance="RANGE", tol_low=0,
-                           tol_high=1)
-        rec = DeviceRecord(info, cfg, readings=[object()], stability_used=True,
-                           stable_value=0.5, stable_after=3.2)
-        self.assertEqual(rec.verdict()[0], "PASS")
-        rec.stable_value = None
-        self.assertEqual(rec.verdict()[0], "FAIL")
+    def test_settings_of_removed_features_are_ignored(self):
+        old = {"function": "FRES", "conversion": "PT100", "tolerance": "RANGE",
+               "tol_low": 0, "tol_high": 1, "moving_average": 5}
+        cfg = DeviceConfig.from_dict(old)
+        self.assertEqual((cfg.function, cfg.conversion), ("FRES", "NONE"))
+        self.assertFalse(hasattr(cfg, "tolerance"))
 
 
 class ProfileTests(unittest.TestCase):
@@ -86,9 +84,9 @@ class ProfileTests(unittest.TestCase):
         info = DeviceInfo("SIM", calibration_message="T034")
         rec = DeviceRecord(info, DeviceConfig(function="FRES", label="red"), readings=[],
                            stability_used=True, stable_value=108.6446, stable_after=4.25)
-        row = summary_rows(MeasurementRecord([rec], 1, 60))[0]
-        self.assertIn("108", row[9])
-        self.assertTrue(row[10].endswith("s"))
+        row = dict(zip(SUMMARY_HEADERS, summary_rows(MeasurementRecord([rec], 1, 60))[0]))
+        self.assertIn("108", row["Final value (stable)"])
+        self.assertTrue(row["Stable after"].endswith("s"))
 
 
 class ClockAxisTests(unittest.TestCase):
