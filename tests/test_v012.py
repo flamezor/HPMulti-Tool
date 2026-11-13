@@ -96,7 +96,7 @@ class ClockAxisTests(unittest.TestCase):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         from PySide6.QtWidgets import QApplication
         QApplication.instance() or QApplication([])
-        from hpmultitool.gui.main_window import ClockAxis
+        from hpmultitool.gui.plotting import ClockAxis
         axis = ClockAxis(orientation="bottom")
         start = time.mktime((2026, 11, 13, 8, 0, 3, 0, 0, -1)) + 0.4
         levels = axis.tickValues(start, start + 47, 600)

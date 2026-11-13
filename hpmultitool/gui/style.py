@@ -52,6 +52,19 @@ def stylesheet(name: str, checkmark: str = "") -> str:
                       background: {c['surface2']}; border-radius: 6px; padding: 1px 8px; }}
     #LoopBanner {{ background: {c['surface']}; border: 2px solid {c['accent']}; border-radius: 12px; }}
     #LoopBanner QWidget {{ background: transparent; }}
+    #LivePanel {{ background: {c['surface']}; border: 1px solid {c['border']}; border-radius: 12px; }}
+    #LivePanel QWidget {{ background: transparent; }}
+    #LiveDisplay {{ background: {c['input']}; border: 1px solid {c['border']}; border-radius: 10px; }}
+    #LiveValue {{ font-family: {MONO_FONTS}; font-size: 40pt; font-weight: 600; color: {c['text']}; }}
+    #LiveFlags {{ color: {c['accent']}; font-size: 9pt; font-weight: 700; letter-spacing: 1px; }}
+    QPushButton#Key {{ padding: 5px 8px; min-width: 44px; border-radius: 7px; font-weight: 600; }}
+    QPushButton#Key:checked {{ background: {c['accent']}; color: {c['accent_text']};
+                               border-color: {c['accent']}; }}
+    QToolButton#Segment {{ padding: 6px 18px; border: 1px solid {c['border']}; border-radius: 8px;
+                           font-weight: 700; color: {c['muted']}; }}
+    QToolButton#Segment:checked {{ background: {c['accent']}; color: {c['accent_text']};
+                                   border-color: {c['accent']}; }}
+    #RecordLabel {{ color: {c['danger']}; font-weight: 700; }}
     #BannerTitle {{ font-size: 13pt; font-weight: 700; color: {c['accent']}; }}
     QListWidget {{ background: {c['input']}; border: 1px solid {c['border']}; border-radius: 8px;
                    padding: 4px; }}

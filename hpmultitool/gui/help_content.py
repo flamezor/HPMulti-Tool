@@ -152,6 +152,28 @@ measurement that never became stable counts as FAIL. Typical use: temperature te
 sensors that need time to settle.</p>
 <p>Example: N = 10, limit 0.01 % at 1 reading per second → stable as soon as ten consecutive
 readings of a 100 Ω conductor differ by less than 10 mΩ.</p>"""),
+        ("Live mode", """
+<h2>Live mode</h2>
+<p>Switch to <b>Live</b> in the header. <i>Start live</i> keeps the ticked instruments connected and
+shows their readings continuously – like the instrument's own display, but on the PC.</p>
+<ul>
+<li><b>Keys</b> for function, range and resolution work like the front panel; the instrument is
+reconfigured immediately. The line above the reading shows the active settings (e.g. Ω4W · AUTO ·
+6½ Digits · 10 NPLC · NULL).</li>
+<li><b>Null</b> takes the next reading as offset (e.g. to subtract the lead resistance),
+<b>Autozero</b> and <b>Hi-Z</b> are available where the function supports them.</li>
+<li><b>MIN / MAX / Ø</b> run from the last change or <i>Reset</i>.</li>
+<li><b>Pause</b> stops reading one instrument without disconnecting it.</li>
+<li><b>Read rate</b>: how often a reading is taken; <i>As fast as possible</i> depends on the
+resolution.</li>
+<li><b>Record</b> logs the readings at any time (autosave included). After <i>Stop recording</i>
+the data is available under Measurement › Export (CSV/TXT) and as PNG. A change of settings
+during the recording starts a new section in the report.</li>
+<li>Changes made in live mode are taken over into the instrument settings, so a following
+measurement uses them.</li>
+<li><i>Stop live</i> (or switching back to Measurement) returns the instruments to their front
+panel.</li>
+</ul>"""),
         ("Test profiles", """
 <h2>Test profiles</h2>
 <p>A test profile stores a complete setup under a name: mode, duration, interval, object list,
@@ -363,6 +385,27 @@ stabil wurde, gilt als n. i. O. Typisch für Temperaturprüfungen, lange Leitung
 Einschwingzeit.</p>
 <p>Beispiel: N = 10, Grenze 0,01 % bei 1 Messwert pro Sekunde → stabil, sobald zehn aufeinander
 folgende Werte eines 100-Ω-Leiters weniger als 10 mΩ auseinanderliegen.</p>"""),
+        ("Live-Modus", """
+<h2>Live-Modus</h2>
+<p>In der Kopfzeile auf <b>Live</b> umschalten. <i>Live starten</i> hält die angehakten Geräte
+verbunden und zeigt ihre Messwerte fortlaufend – wie das Display am Gerät, nur am PC.</p>
+<ul>
+<li>Die <b>Tasten</b> für Funktion, Bereich und Auflösung funktionieren wie an der Frontplatte;
+das Gerät wird sofort umgestellt. Die Zeile über dem Messwert zeigt die aktiven Einstellungen
+(z. B. Ω4W · AUTO · 6½ Digits · 10 NPLC · NULL).</li>
+<li><b>Null</b> übernimmt den nächsten Messwert als Offset (z. B. um den Leitungswiderstand
+abzuziehen), <b>Autozero</b> und <b>Hi-Z</b> gibt es, wo die Funktion sie unterstützt.</li>
+<li><b>MIN / MAX / Ø</b> laufen seit der letzten Änderung oder seit <i>Zurücksetzen</i>.</li>
+<li><b>Pause</b> hält ein Gerät an, ohne die Verbindung zu trennen.</li>
+<li><b>Leserate</b>: wie oft gemessen wird; <i>So schnell wie möglich</i> hängt von der Auflösung
+ab.</li>
+<li><b>Aufnahme</b> schreibt die Messwerte jederzeit mit (inklusive Autosave). Nach <i>Aufnahme
+stoppen</i> stehen die Daten unter Messung › Export (CSV/TXT) und als PNG bereit. Eine Änderung der
+Einstellungen während der Aufnahme beginnt einen neuen Abschnitt im Protokoll.</li>
+<li>Änderungen im Live-Modus werden in die Geräteeinstellungen übernommen, eine folgende Messung
+nutzt sie also.</li>
+<li><i>Live beenden</i> (oder zurück zu Messung) gibt die Geräte an die Frontplatte zurück.</li>
+</ul>"""),
         ("Prüfprofile", """
 <h2>Prüfprofile</h2>
 <p>Ein Prüfprofil speichert eine komplette Einrichtung unter einem Namen: Betriebsart, Dauer,

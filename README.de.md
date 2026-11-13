@@ -23,6 +23,8 @@ Läuft unter Linux und Windows (Python 3.10+, Qt/PySide6). Oberfläche auf Deuts
 - **Prüfprofile**: komplette Einrichtung (Messablauf + Einstellungen aller Geräte) unter einem
   Namen speichern und laden
 - Live-Anzeige, Diagramm (Uhrzeit auf der x-Achse, Export als PNG), Tabelle, Übersicht
+- **Live-Modus**: virtuelles Frontpanel pro Gerät – Tasten für Funktion, Bereich und Auflösung,
+  Null, Autozero, laufende Min/Max/Ø-Anzeige, rollendes Diagramm; jederzeit aufnehmen
 - Export als `.csv` (deutsches oder internationales Format) und `.txt`-Protokoll;
   jede Messung wird zusätzlich fortlaufend automatisch gesichert
 - Geräte werden über eine im Gerät gespeicherte Kennung identifiziert – unabhängig vom COM-Port;

@@ -41,6 +41,8 @@ from ..profiles import (assign_configs, delete_profile, list_profiles, load_prof
 from .advanced_dialog import AdvancedDialog
 from .device_panel import DeviceSettingsPanel
 from .help_dialog import HelpDialog
+from .live_page import LivePage
+from .plotting import ClockAxis
 from .icon import app_icon
 from .style import DEVICE_COLORS, THEMES, checkmark_file, stylesheet
 from .widgets import Card, DataCombo, FormRow, StatusDot, Task, hint, muted, section_label
@@ -75,43 +77,6 @@ def _hms(seconds: float) -> str:
 
 def _items(presets):
     return [(value, tr(text)) for value, text in presets]
-
-
-# ---------------------------------------------------------------------------
-class ClockAxis(pg.AxisItem):
-    """Time axis showing the time of day as HH:MM:SS (x values are Unix timestamps)."""
-
-    STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600,
-             43200, 86400]
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.enableAutoSIPrefix(False)  # timestamps must not be shown as "x1e+09"
-
-    def tickSpacing(self, minVal, maxVal, size):  # noqa: N802 - Qt naming
-        span = max(maxVal - minVal, 1e-9)
-        wanted = max(2, int(size / 90))  # roughly one label per 90 px
-        major = next((step for step in self.STEPS if span / step <= wanted), self.STEPS[-1])
-        minor = next((step for step in reversed(self.STEPS) if step < major), major)
-        return [(major, 0), (minor, 0)]
-
-    def tickValues(self, minVal, maxVal, size):  # noqa: N802
-        # Align ticks to local clock time, not to UTC.
-        offset = -time.localtime(minVal if minVal > 0 else time.time()).tm_gmtoff
-        levels = []
-        for spacing, _ in self.tickSpacing(minVal, maxVal, size):
-            start = (minVal - offset) // spacing * spacing + offset
-            values = []
-            value = start
-            while value <= maxVal and len(values) < 200:
-                if value >= minVal:
-                    values.append(value)
-                value += spacing
-            levels.append((spacing, values))
-        return levels
-
-    def tickStrings(self, values, scale, spacing):  # noqa: N802
-        return [datetime.fromtimestamp(v).strftime("%H:%M:%S") if v > 0 else "" for v in values]
 
 
 # ---------------------------------------------------------------------------
@@ -468,7 +433,13 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(wrapper)
         lay.setContentsMargins(12, 12, 12, 12)
         lay.addWidget(splitter)
-        root.addWidget(wrapper, 1)
+        self.pages = QStackedWidget()
+        self.pages.addWidget(wrapper)
+        self.live_page = LivePage(self)
+        self.live_page.running_changed.connect(self._live_running_changed)
+        self.live_page.record_ready.connect(self._live_record_ready)
+        self.pages.addWidget(self.live_page)
+        root.addWidget(self.pages, 1)
         self.statusBar().showMessage(tr("Ready"))
 
         for text, key, slot in ((tr("Scan for instruments"), "F5", self.scan_devices),
@@ -499,6 +470,17 @@ class MainWindow(QMainWindow):
             badge = QLabel("SIMULATION")
             badge.setObjectName("Badge")
             layout.addWidget(badge)
+        layout.addSpacing(24)
+        self.page_buttons = []
+        for index, text in enumerate((tr("Measurement"), tr("Live"))):
+            button = QToolButton()
+            button.setObjectName("Segment")
+            button.setText(text)
+            button.setCheckable(True)
+            button.setChecked(index == 0)
+            button.clicked.connect(lambda _=False, i=index: self.show_page(i))
+            layout.addWidget(button)
+            self.page_buttons.append(button)
         layout.addStretch(1)
         self.language_combo = DataCombo()
         self.language_combo.setMinimumContentsLength(7)
@@ -859,6 +841,8 @@ class MainWindow(QMainWindow):
         self.plot_widget.setBackground(THEMES[self.theme]["plot_bg"])
         for item in self._plot_items():
             self._style_plot(item)
+        if hasattr(self, "live_page"):
+            self.live_page.apply_theme(self.theme)
 
     def _plot_items(self):
         layout = self.plot_widget.ci
@@ -877,7 +861,7 @@ class MainWindow(QMainWindow):
         code = self.language_combo.currentData()
         if code == language():
             return
-        if self.session is not None or self.loop is not None:
+        if self.busy():
             QMessageBox.information(self, APP_NAME, tr("The language can be changed after the "
                                                        "measurement."))
             self.language_combo.select_data(language())
@@ -888,6 +872,36 @@ class MainWindow(QMainWindow):
 
     def show_help(self):
         HelpDialog(self).exec()
+
+    # ================================================================ pages / live
+    def show_page(self, index: int):
+        for i, button in enumerate(self.page_buttons):
+            button.setChecked(i == index)
+        if index == self.pages.currentIndex():
+            return
+        if index == 1 and (self.session is not None or self.loop is not None):
+            QMessageBox.information(self, APP_NAME, tr("Live mode is available after the "
+                                                       "measurement."))
+            self.page_buttons[0].setChecked(True)
+            self.page_buttons[1].setChecked(False)
+            return
+        if index == 0 and self.live_page.running:
+            if QMessageBox.question(self, APP_NAME, tr("Stop live mode?")) != QMessageBox.Yes:
+                self.page_buttons[0].setChecked(False)
+                self.page_buttons[1].setChecked(True)
+                return
+            self.live_page.shutdown()
+        self.pages.setCurrentIndex(index)
+
+    def _live_running_changed(self, running: bool):
+        self._set_running(running)
+        self.stop_button.setEnabled(False)
+
+    def _live_record_ready(self, record):
+        self.record = record
+        self.table_model.reset()
+        self.table_model.add(record.rows())
+        self._update_summary()
 
     # ================================================================ logging
     def log_message(self, text: str, level: str = "info"):
@@ -908,8 +922,14 @@ class MainWindow(QMainWindow):
         task.signals.failed.connect(lambda e: finish(False, e))
         self.pool.start(task)
 
+    def busy(self) -> bool:
+        """True while a measurement, a series or live mode uses the instruments."""
+        live = getattr(self, "live_page", None)
+        return self.session is not None or self.loop is not None or (
+            live is not None and live.running)
+
     def scan_devices(self):
-        if self.session is not None or self.loop is not None:
+        if self.busy():
             return
         self._store_configs()
         self.scan_button.setEnabled(False)
@@ -1027,7 +1047,7 @@ class MainWindow(QMainWindow):
             row.set_selected(i == index)
 
     def open_advanced(self, info: DeviceInfo):
-        if self.session is not None or self.loop is not None:
+        if self.busy():
             QMessageBox.information(self, APP_NAME, tr("Not available during a measurement."))
             return
         others = [d.label for d in self.devices if d is not info]
@@ -1050,7 +1070,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def apply_mode(self, info: DeviceInfo):
-        if self.session is not None or self.loop is not None:
+        if self.busy():
             return
         config = self.panels[info.port].config()
         problems = validate(config)
@@ -1184,7 +1204,7 @@ class MainWindow(QMainWindow):
     # ================================================================ measurement
     def start_measurement(self):
         selected = self._selected()
-        if not selected:
+        if not selected or self.busy():
             return
         for info, config in selected:
             problems = validate(config)
@@ -1753,10 +1773,12 @@ class MainWindow(QMainWindow):
                                           "instrument under a name."))
 
     # ================================================================ export
-    def export_chart(self):
-        if not self.curves:
+    def export_chart(self, widget=None):
+        widget = widget or self.plot_widget
+        if widget is self.plot_widget and not self.curves:
             return
-        stamp = (self.record.started_at or datetime.now()).strftime("%Y%m%d_%H%M%S")
+        started = self.record.started_at if self.record is not None else None
+        stamp = (started or datetime.now()).strftime("%Y%m%d_%H%M%S")
         folder = self.settings.value("export/folder", str(Path.home()))
         suggestion = str(Path(folder) / f"HPMulti_{stamp}_chart.png")
         path, _ = QFileDialog.getSaveFileName(self, tr("Save chart"), suggestion,
@@ -1766,7 +1788,6 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".png"):
             path += ".png"
         # Render at twice the screen resolution for sharp images.
-        widget = self.plot_widget
         ratio = 2.0
         image = QImage(int(widget.width() * ratio), int(widget.height() * ratio),
                        QImage.Format_ARGB32)
@@ -1813,6 +1834,12 @@ class MainWindow(QMainWindow):
     # ================================================================ close
     def shutdown(self) -> bool:
         """Stop running work and save settings. False if the user cancelled."""
+        if self.live_page.running:
+            if self.live_page.recording and QMessageBox.question(
+                    self, APP_NAME, tr("A live recording is running. Stop it and quit?")) \
+                    != QMessageBox.Yes:
+                return False
+            self.live_page.shutdown()
         if self.session is not None or self.loop is not None:
             if QMessageBox.question(self, APP_NAME, tr("A measurement is running. Stop and quit?")) != QMessageBox.Yes:
                 return False

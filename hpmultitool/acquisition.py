@@ -112,6 +112,45 @@ def set_mode_only(info: DeviceInfo, config: DeviceConfig) -> None:
         meter.close(local=True)
 
 
+def read_point(meter, config: DeviceConfig, slot: int, point: int, t0: float) -> Reading:
+    """Take one reading (READ?, or INIT/*TRG/FETC? for the software trigger)."""
+    try:
+        if config.trigger_source == "BUS":
+            # Software trigger: arm, trigger, then fetch (READ? would deadlock).
+            meter.write("INIT")
+            meter.write("*TRG")
+            raw = meter.query("FETC?")
+        else:
+            raw = meter.query("READ?")
+    except TimeoutError:
+        stamp = datetime.now().astimezone()
+        try:
+            meter.device_clear()
+        except SERIAL_ERRORS:
+            pass
+        return Reading(slot, point, stamp, time.monotonic() - t0, None,
+                       "", "TIMEOUT")
+    stamp = datetime.now().astimezone()
+    elapsed = time.monotonic() - t0
+    try:
+        values = [float(part) for part in raw.split(",")]
+    except ValueError:
+        return Reading(slot, point, stamp, elapsed, None, raw, "ERROR")
+    if any(is_overload(v) for v in values):
+        return Reading(slot, point, stamp, elapsed, None, raw, "OVERLOAD", len(values),
+                       None, verdict(config, None, None))
+    value = sum(values) / len(values)
+    status = "OK"
+    if config.math == MATH_LIMIT:
+        if value < config.limit_lower:
+            status = "LOW"
+        elif value > config.limit_upper:
+            status = "HIGH"
+    derived = derive(config, value)
+    return Reading(slot, point, stamp, elapsed, value, raw, status, len(values),
+                   derived, verdict(config, value, derived))
+
+
 class _DeviceWorker(threading.Thread):
     def __init__(self, session: "Session", slot: int, info: DeviceInfo, config: DeviceConfig):
         super().__init__(name=f"HP34401A-{info.port}", daemon=True)
@@ -215,41 +254,7 @@ class _DeviceWorker(threading.Thread):
             self.emit("unstable", tr("not stable"))
 
     def _read_point(self, meter, point, t0) -> Reading:
-        try:
-            if self.config.trigger_source == "BUS":
-                # Software trigger: arm, trigger, then fetch (READ? would deadlock).
-                meter.write("INIT")
-                meter.write("*TRG")
-                raw = meter.query("FETC?")
-            else:
-                raw = meter.query("READ?")
-        except TimeoutError:
-            stamp = datetime.now().astimezone()
-            try:
-                meter.device_clear()
-            except SERIAL_ERRORS:
-                pass
-            return Reading(self.slot, point, stamp, time.monotonic() - t0, None,
-                           "", "TIMEOUT")
-        stamp = datetime.now().astimezone()
-        elapsed = time.monotonic() - t0
-        try:
-            values = [float(part) for part in raw.split(",")]
-        except ValueError:
-            return Reading(self.slot, point, stamp, elapsed, None, raw, "ERROR")
-        if any(is_overload(v) for v in values):
-            return Reading(self.slot, point, stamp, elapsed, None, raw, "OVERLOAD", len(values),
-                           None, verdict(self.config, None, None))
-        value = sum(values) / len(values)
-        status = "OK"
-        if self.config.math == MATH_LIMIT:
-            if value < self.config.limit_lower:
-                status = "LOW"
-            elif value > self.config.limit_upper:
-                status = "HIGH"
-        derived = derive(self.config, value)
-        return Reading(self.slot, point, stamp, elapsed, value, raw, status, len(values),
-                       derived, verdict(self.config, value, derived))
+        return read_point(meter, self.config, self.slot, point, t0)
 
     def _report_minmax(self, meter):
         data = {}

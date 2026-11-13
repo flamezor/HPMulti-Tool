@@ -23,6 +23,8 @@ German.
   the mean of these readings is the final value
 - **Test profiles**: save and load a complete setup (plan + settings of every instrument) by name
 - Live display, chart (time of day on the x axis, export as PNG), table, summary
+- **Live mode**: virtual front panel per instrument – function, range and resolution keys, null,
+  autozero, live min/max/average, rolling chart; record at any time
 - Export as `.csv` (German or international format) and as a `.txt` report;
   every measurement is also autosaved continuously
 - Instruments are identified by an ID stored in the instrument – independent of the COM port;
@@ -99,6 +101,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 | `hpmultitool/functions.py` | functions, ranges, settings → SCPI commands, formatting |
 | `hpmultitool/analysis.py` | conversion, tolerance, statistics |
 | `hpmultitool/acquisition.py` | measurement run, one thread per instrument, common time grid |
+| `hpmultitool/live.py` | live mode: permanent connection, settings changed on the fly |
 | `hpmultitool/export.py` | CSV/TXT export, autosave |
 | `hpmultitool/profiles.py` | test profiles (JSON) |
 | `hpmultitool/device_id.py` | back up and write the instrument ID |
