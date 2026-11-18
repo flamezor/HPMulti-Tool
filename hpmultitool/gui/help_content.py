@@ -251,12 +251,17 @@ exactly one reading.</p>
 a sensor cable:</p>
 <ol>
 <li>Choose <i>Measurement series</i> as mode and enter the objects (e.g. red, yellow, black,
-white …) or insert a template. Drag to reorder.</li>
+white …), one per line in the order of measurement – or choose a template. Your own lists can be
+kept with <i>Save as template …</i>: choose a template, change the list and save it under the same
+name to edit it. <i>Delete template</i> removes it; deleted standard templates come back with
+<i>Restore standard templates</i>.</li>
 <li>Set the duration per object (often <i>1 reading</i> or a few seconds).</li>
 <li><i>Start measurement</i>: a banner shows which object to connect to which instrument. Connect
 it and press <b>Measure</b> (or Enter).</li>
-<li>With two instruments, two objects are measured per step (e.g. T034 → red, T049 →
-yellow).</li>
+<li>With two instruments, each one has its own list: choose under <i>Edit the list of</i> which
+instrument's list is shown. In every step each instrument measures its next object (e.g. T034 →
+red, T049 → white). An instrument with a shorter list rests in the last steps; one without
+objects is not measured.</li>
 <li><i>Repeat last step</i> measures the previous object again (e.g. after a bad contact),
 <i>Skip</i> leaves an object out, <i>End series</i> finishes early.</li>
 <li>Alternatively <i>Automatically after a pause</i>: the next step starts after the pause.</li>
@@ -281,7 +286,8 @@ reconfigured immediately. The line above the reading shows the active settings (
 6½ Digits · 10 NPLC · NULL).</li>
 <li><b>Null</b> takes the next reading as offset (e.g. to subtract the lead resistance),
 <b>Autozero</b> and <b>Hi-Z</b> are available where the function supports them.</li>
-<li><b>MIN / MAX / Ø</b> run from the last change or <i>Reset</i>.</li>
+<li><b>MIN / MAX / Ø</b> run from the last change or <i>Reset</i>. <i>Reset</i> also clears
+the chart of that instrument (a running recording keeps all readings).</li>
 <li><b>Pause</b> stops reading one instrument without disconnecting it.</li>
 <li><b>Read rate</b>: how often a reading is taken; <i>As fast as possible</i> depends on the
 resolution.</li>
@@ -332,8 +338,7 @@ T034.</p>
 disabled with the security code (factory default HP034401), the ID is written and read back, and
 calibration security is enabled again. Calibration constants and the calibration count are not
 changed.</p>
-<p>Also available: self-test, error queue, reset (*RST), beeper test and text on the instrument
-display.</p>"""),
+<p>Also available: self-test, error queue, reset (*RST) and beeper test.</p>"""),
         ("Troubleshooting", """
 <h2>Troubleshooting</h2>
 <ul>
@@ -610,12 +615,17 @@ einen Messwert auf.</p>
 Sensorkabels:</p>
 <ol>
 <li>Betriebsart <i>Messreihe</i> wählen und die Objekte eintragen (z. B. rot, gelb, schwarz,
-weiß …) oder eine Vorlage einfügen. Reihenfolge per Ziehen ändern.</li>
+weiß …), eines pro Zeile in der Reihenfolge der Messung – oder eine Vorlage wählen. Eigene Listen
+lassen sich mit <i>Als Vorlage speichern …</i> aufheben: Vorlage wählen, Liste ändern und unter
+demselben Namen speichern, um sie zu bearbeiten. <i>Vorlage löschen</i> entfernt sie; gelöschte
+Standardvorlagen holt <i>Standardvorlagen wiederherstellen</i> zurück.</li>
 <li>Messdauer je Objekt einstellen (oft <i>1 Messwert</i> oder wenige Sekunden).</li>
 <li><i>Messung starten</i>: ein Banner zeigt, welches Objekt an welches Gerät anzuschließen ist.
 Anschließen und <b>Messen</b> drücken (oder Enter).</li>
-<li>Mit zwei Geräten werden je Schritt zwei Objekte gemessen (z. B. T034 → rot, T049 →
-gelb).</li>
+<li>Mit zwei Geräten hat jedes seine eigene Liste: unter <i>Liste bearbeiten für</i> wählen,
+welche Liste angezeigt wird. In jedem Schritt misst jedes Gerät sein nächstes Objekt (z. B. T034 →
+rot, T049 → weiß). Ein Gerät mit kürzerer Liste pausiert in den letzten Schritten, eines ohne
+Objekte wird nicht gemessen.</li>
 <li><i>Letzten Schritt wiederholen</i> misst das vorige Objekt erneut (z. B. nach einem
 Wackelkontakt), <i>Überspringen</i> lässt ein Objekt aus, <i>Messreihe beenden</i> bricht vorzeitig
 ab.</li>
@@ -642,7 +652,9 @@ das Gerät wird sofort umgestellt. Die Zeile über dem Messwert zeigt die aktive
 (z. B. Ω4W · AUTO · 6½ Digits · 10 NPLC · NULL).</li>
 <li><b>Null</b> übernimmt den nächsten Messwert als Offset (z. B. um den Leitungswiderstand
 abzuziehen), <b>Autozero</b> und <b>Hi-Z</b> gibt es, wo die Funktion sie unterstützt.</li>
-<li><b>MIN / MAX / Ø</b> laufen seit der letzten Änderung oder seit <i>Zurücksetzen</i>.</li>
+<li><b>MIN / MAX / Ø</b> laufen seit der letzten Änderung oder seit <i>Zurücksetzen</i>.
+<i>Zurücksetzen</i> leert auch das Diagramm dieses Geräts (eine laufende Aufnahme behält alle
+Messwerte).</li>
 <li><b>Pause</b> hält ein Gerät an, ohne die Verbindung zu trennen.</li>
 <li><b>Leserate</b>: wie oft gemessen wird; <i>So schnell wie möglich</i> hängt von der Auflösung
 ab.</li>
@@ -693,8 +705,7 @@ T034.</p>
 Kalibriersicherung mit dem Sicherheitscode aufgehoben (Werkseinstellung HP034401), die Kennung
 geschrieben und zurückgelesen und die Kalibriersicherung wieder aktiviert. Kalibrierwerte und
 Kalibrierzähler bleiben unverändert.</p>
-<p>Außerdem: Selbsttest, Fehlerspeicher, Reset (*RST), Signalton-Test und Text auf dem
-Gerätedisplay.</p>"""),
+<p>Außerdem: Selbsttest, Fehlerspeicher, Reset (*RST) und Signalton-Test.</p>"""),
         ("Fehlerbehebung", """
 <h2>Fehlerbehebung</h2>
 <ul>

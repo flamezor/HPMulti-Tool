@@ -60,11 +60,22 @@ class LoopAndExportTests(unittest.TestCase):
     def test_loop_steps_distribution(self):
         from hpmultitool.series import build_loop_steps
         a, b = DeviceInfo("A", calibration_message="T034"), DeviceInfo("B", calibration_message="T049")
+        # Each instrument works through its own list; the shorter one rests at the end.
         steps = build_loop_steps([(a, DeviceConfig()), (b, DeviceConfig())],
-                                 ["red", "yellow", "black", "white", "green"])
+                                 {"T034": ["red", "yellow", "black"], "T049": ["white", "green"]})
         self.assertEqual([[c.label for _, c in s] for s in steps],
-                         [["red", "yellow"], ["black", "white"], ["green"]])
+                         [["red", "white"], ["yellow", "green"], ["black"]])
         self.assertIs(steps[2][0][0], a)
+        # An instrument without objects is not measured; no objects at all: no steps.
+        steps = build_loop_steps([(a, DeviceConfig()), (b, DeviceConfig())], {"T049": ["x"]})
+        self.assertEqual([[i.label for i, _ in s] for s in steps], [["T049"]])
+        self.assertEqual(build_loop_steps([(a, DeviceConfig())], {}), [])
+
+    def test_object_lists_from_stored_data(self):
+        from hpmultitool.series import object_lists_from
+        self.assertEqual(object_lists_from(["red", " yellow ", ""]), {"": ["red", "yellow"]})
+        self.assertEqual(object_lists_from({"T034": ["a"], "T049": "bad"}), {"T034": ["a"]})
+        self.assertEqual(object_lists_from(None), {})
 
     def test_export_with_steps_and_result(self):
         info = DeviceInfo("SIM", identification="HP,34401A,0,1", calibration_message="T034")

@@ -50,7 +50,7 @@ def language() -> str:
     return _language
 
 
-def tr(text: str, **values) -> str:
+def tr(text: str, /, **values) -> str:
     text = _catalogue.get(text, text)
     return text.format(**values) if values else text
 

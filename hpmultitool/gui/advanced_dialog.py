@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QGridLayout
 from ..device_id import (DEFAULT_SECURITY_CODE, DISPLAY_LENGTH, MAX_LENGTH, validate_id,
                          write_device_id)
 from ..i18n import tr
-from ..instrument import DeviceInfo, encode_scpi_string, open_instrument
+from ..instrument import DeviceInfo, open_instrument
 from ..paths import backup_dir
 from .widgets import Card, FormRow, Task, hint, muted
 
@@ -125,7 +125,7 @@ class AdvancedDialog(QDialog):
         self.write_button.clicked.connect(self.write_id)
 
         # diagnostics -----------------------------------------------------------
-        card = Card(tr("Diagnostics & display"))
+        card = Card(tr("Diagnostics"))
         buttons = QGridLayout()
         self.selftest_button = QPushButton(tr("Self-test (*TST?)"))
         self.errors_button = QPushButton(tr("Read error queue"))
@@ -136,29 +136,12 @@ class AdvancedDialog(QDialog):
         buttons.addWidget(self.reset_button, 1, 0)
         buttons.addWidget(self.beep_button, 1, 1)
         card.body.addLayout(buttons)
-        self.display_text = QLineEdit()
-        self.display_text.setMaxLength(12)
-        self.display_text.setValidator(
-            QRegularExpressionValidator(QRegularExpression(r"[ -~]*"), self))
-        self.display_text.setPlaceholderText(tr("Text for the instrument display (max. 12 "
-                                                "characters)"))
-        show_text = QPushButton(tr("Show"))
-        clear_text = QPushButton(tr("Clear"))
-        row = QHBoxLayout()
-        row.addWidget(self.display_text, 1)
-        row.addWidget(show_text)
-        row.addWidget(clear_text)
-        card.body.addLayout(row)
         root.addWidget(card)
         self.selftest_button.clicked.connect(self.self_test)
         self.errors_button.clicked.connect(self.read_errors)
         self.reset_button.clicked.connect(self.reset_device)
         self.beep_button.clicked.connect(
             lambda: self._run(tr("Beeper"), lambda m: m.write("SYST:BEEP") or tr("beeped")))
-        show_text.clicked.connect(self.show_text)
-        clear_text.clicked.connect(
-            lambda: self._run(tr("Display text"),
-                              lambda m: m.write("DISP:TEXT:CLE") or tr("cleared")))
 
         # log -------------------------------------------------------------------
         self.log = QPlainTextEdit()
@@ -302,10 +285,3 @@ class AdvancedDialog(QDialog):
                 != QMessageBox.Yes:
             return
         self._run(tr("Reset"), lambda m: m.write("*RST") or tr("instrument reset"))
-
-    def show_text(self):
-        text = self.display_text.text()
-        self._run(tr("Display text"),
-                  lambda m: m.write(f"DISP:TEXT {encode_scpi_string(text)}")
-                  or tr("{text!r} shown (stays until cleared or a front-panel key is pressed)",
-                        text=text))

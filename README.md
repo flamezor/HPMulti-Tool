@@ -76,7 +76,8 @@ the window; default is the system language).
 2. **Instrument settings** – one tab per instrument. Only options that apply to the selected
    function are shown. Settings are stored per instrument ID.
 3. **Measurement** – *Continuous measurement* (duration or unlimited, interval) or
-   *Measurement series (loop)* with an object list, then *Start measurement*.
+   *Measurement series (loop)* with an object list per instrument (one per line; own lists can
+   be saved as templates), then *Start measurement*.
 4. **Export** – after the measurement as `.csv` or `.txt`.
 
 The help window (F1) explains every function in detail.
@@ -106,7 +107,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 | `hpmultitool/specs.py` | instrument error h from the accuracy tables of the user's guide |
 | `hpmultitool/acquisition.py` | measurement run, one thread per instrument, common time grid |
 | `hpmultitool/live.py` | live mode: permanent connection, settings changed on the fly |
-| `hpmultitool/series.py` | measurement series (loop): objects distributed over instruments |
+| `hpmultitool/series.py` | measurement series (loop): object list per instrument, templates |
 | `hpmultitool/export.py` | CSV/TXT export, autosave |
 | `hpmultitool/profiles.py` | test profiles (JSON) |
 | `hpmultitool/device_id.py` | back up and write the instrument ID |

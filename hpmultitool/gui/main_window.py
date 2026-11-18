@@ -459,7 +459,9 @@ class MainWindow(QMainWindow):
             and all(is_loggable(config) for _, config in selected))
 
     def _update_plan_info(self):
-        self.plan_card.update_info([config for _, config in self.selected_devices()])
+        selected = self.selected_devices()
+        self.plan_card.set_devices([info.label for info, _ in selected])
+        self.plan_card.update_info([config for _, config in selected])
 
     def _set_running(self, running: bool):
         self.plan_card.set_running(running)
@@ -502,11 +504,11 @@ class MainWindow(QMainWindow):
             return
         loop = self.plan_card.is_loop()
         if loop:
-            objects = self.plan_card.objects()
-            if not objects:
+            self.plan_card.set_devices([info.label for info, _ in selected])
+            steps = build_loop_steps(selected, self.plan_card.object_lists())
+            if not steps:
                 QMessageBox.warning(self, APP_NAME, tr("The object list of the series is empty."))
                 return
-            steps = build_loop_steps(selected, objects)
         else:
             steps = [selected]
         self._store_settings()

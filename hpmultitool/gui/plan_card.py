@@ -4,17 +4,17 @@ from __future__ import annotations
 
 import json
 
-from PySide6.QtCore import QSettings, Qt, Signal
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QDoubleSpinBox, QHBoxLayout,
-                               QLineEdit, QListWidget, QListWidgetItem, QProgressBar, QPushButton,
-                               QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtCore import QSettings, Signal
+from PySide6.QtWidgets import (QCheckBox, QDoubleSpinBox, QHBoxLayout, QInputDialog, QLineEdit,
+                               QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QSpinBox,
+                               QVBoxLayout, QWidget)
 
 from ..acquisition import Plan, Stability
 from ..analysis import MIN_READINGS
 from ..functions import DeviceConfig, estimated_reading_time, not_loggable_text
 from ..i18n import localize_number, tr
-from ..series import (ADVANCE_AUTO, ADVANCE_CONFIRM, LOOP_TEMPLATES, MODE_LOOP, MODE_SINGLE,
-                      step_count)
+from ..series import (ADVANCE_AUTO, ADVANCE_CONFIRM, MODE_LOOP, MODE_SINGLE, TemplateStore,
+                      object_lists_from, parse_objects)
 from .time_input import DURATION_PRESETS, INTERVAL_PRESETS, TimeInput
 from .widgets import Card, DataCombo, FormRow, muted
 
@@ -30,6 +30,12 @@ class PlanCard(Card):
     def __init__(self, settings: QSettings):
         super().__init__(tr("Measurement"))
         self._ready = False
+        self._settings = settings
+        self._filling_templates = False
+        self._loading_objects = False
+        self._devices: list[str] = []       # IDs of the selected instruments
+        self._lists: dict[str, list[str]] = {}   # object list per instrument ID ("" = default)
+        self._editing = ""                  # ID whose list is in the text field
         self.mode = DataCombo()
         self.mode.set_items([(MODE_SINGLE, tr("Continuous measurement")),
                              (MODE_LOOP, tr("Measurement series (loop): objects one after another"))],
@@ -121,39 +127,40 @@ class PlanCard(Card):
         layout = QVBoxLayout(box)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
-        layout.addWidget(muted(tr("Objects measured one after another (e.g. the cores of a "
-                                  "cable). Drag to reorder, double-click to rename.")))
+        layout.addWidget(muted(tr("Objects measured one after another, one per line (e.g. the "
+                                  "cores of a cable).")))
+        try:
+            self.templates = TemplateStore.from_dict(
+                json.loads(settings.value("loop/templates", "{}")))
+        except (TypeError, ValueError):
+            self.templates = TemplateStore()
+        self.list_for = DataCombo()
+        self.list_for.currentIndexChanged.connect(self._list_for_changed)
+        self.list_for_row = FormRow(tr("Each instrument has its own list. Edit the list of:"),
+                                    self.list_for)
+        self.list_for_row.setVisible(False)
+        layout.addWidget(self.list_for_row)
         self.template = DataCombo()
-        self.template.set_items([(None, tr("Insert template …"))] + [
-            (i, f"{tr(name)}: {tr(items)}") for i, (name, items) in enumerate(LOOP_TEMPLATES)])
         self.template.currentIndexChanged.connect(self._apply_template)
         layout.addWidget(self.template)
-        self.object_list = QListWidget()
-        self.object_list.setDragDropMode(QAbstractItemView.InternalMove)
-        self.object_list.setMinimumHeight(150)
-        self.object_list.setMaximumHeight(210)
-        self.object_list.model().rowsMoved.connect(self._emit_changed)
-        self.object_list.itemChanged.connect(self._emit_changed)
-        layout.addWidget(self.object_list)
+        self.object_text = QPlainTextEdit()
+        self.object_text.setPlaceholderText(tr("One object per line, e.g.\nred\nyellow\nblack"))
+        self.object_text.setMinimumHeight(150)
+        self.object_text.setMaximumHeight(210)
+        self.object_text.textChanged.connect(self._objects_edited)
+        layout.addWidget(self.object_text)
         row = QHBoxLayout()
-        self.new_object = QLineEdit()
-        self.new_object.setPlaceholderText(tr("New object, e.g. red"))
-        self.new_object.returnPressed.connect(self._add_object)
-        add = QPushButton("+")
-        add.setFixedWidth(40)
-        add.setToolTip(tr("Add (separate several with commas)"))
-        add.clicked.connect(self._add_object)
-        remove = QPushButton("−")
-        remove.setFixedWidth(40)
-        remove.setToolTip(tr("Remove selected object"))
-        remove.clicked.connect(self._remove_object)
-        clear = QPushButton(tr("Clear"))
-        clear.clicked.connect(lambda: self.set_objects([]))
-        row.addWidget(self.new_object, 1)
-        row.addWidget(add)
-        row.addWidget(remove)
-        row.addWidget(clear)
+        save = QPushButton(tr("Save as template …"))
+        save.clicked.connect(self._save_template)
+        self.delete_template_button = QPushButton(tr("Delete template"))
+        self.delete_template_button.clicked.connect(self._delete_template)
+        row.addWidget(save, 1)
+        row.addWidget(self.delete_template_button, 1)
         layout.addLayout(row)
+        self.restore_templates_button = QPushButton(tr("Restore standard templates"))
+        self.restore_templates_button.clicked.connect(self._restore_templates)
+        layout.addWidget(self.restore_templates_button)
+        self._fill_templates()
         self.advance = DataCombo()
         self.advance.set_items([(ADVANCE_CONFIRM, tr("After confirmation (button / Enter)")),
                                 (ADVANCE_AUTO, tr("Automatically after a pause"))],
@@ -167,49 +174,121 @@ class PlanCard(Card):
         layout.addWidget(FormRow(tr("Next object"), self.advance))
         layout.addWidget(self.pause_row)
         try:
-            objects = json.loads(settings.value("loop/objects", "[]"))
+            self._lists = object_lists_from(json.loads(settings.value("loop/objects", "{}")))
         except (TypeError, ValueError):
-            objects = []
-        for name in objects:
-            self._append_object(name)
+            self._lists = {}
+        self._show_list()
         self.loop_editor = box
         return box
 
     # ------------------------------------------------------------------ objects
     def objects(self) -> list[str]:
-        return [self.object_list.item(i).text().strip() for i in range(self.object_list.count())
-                if self.object_list.item(i).text().strip()]
+        """The list in the text field (of the instrument being edited)."""
+        return parse_objects(self.object_text.toPlainText())
 
     def set_objects(self, names):
-        self.object_list.clear()
-        for name in names:
-            self._append_object(str(name))
+        self.object_text.setPlainText("\n".join(str(name).strip() for name in names))
+
+    def objects_for(self, device: str) -> list[str]:
+        """Object list of one instrument; the default list if it has none of its own yet."""
+        return list(self._lists.get(device, self._lists.get("", [])))
+
+    def object_lists(self) -> dict[str, list[str]]:
+        """Object list of every selected instrument, by instrument ID."""
+        return {device: self.objects_for(device) for device in self._devices}
+
+    def set_devices(self, devices: list[str]):
+        """The selected instruments (IDs); each one gets its own object list."""
+        if devices == self._devices:
+            return
+        self._devices = list(devices)
+        current = self._editing if self._editing in devices else (devices[0] if devices else "")
+        self.list_for.blockSignals(True)
+        self.list_for.set_items([(device, device) for device in devices], current or None)
+        self.list_for.blockSignals(False)
+        self.list_for_row.setVisible(len(devices) > 1)
+        self._editing = current
+        self._show_list()
+
+    def _list_for_changed(self):
+        self._editing = self.list_for.currentData() or ""
+        self._show_list()
         self._emit_changed()
 
-    def _append_object(self, name: str):
-        item = QListWidgetItem(name)
-        item.setFlags(item.flags() | Qt.ItemIsEditable)
-        self.object_list.addItem(item)
+    def _show_list(self):
+        self._loading_objects = True
+        self.set_objects(self.objects_for(self._editing))
+        self._loading_objects = False
 
-    def _add_object(self):
-        for name in [n.strip() for n in self.new_object.text().split(",")]:
-            if name:
-                self._append_object(name)
-        self.new_object.clear()
+    def _objects_edited(self):
+        if self._loading_objects:
+            return
+        self._lists[self._editing] = self.objects()
         self._emit_changed()
 
-    def _remove_object(self):
-        for item in self.object_list.selectedItems():
-            self.object_list.takeItem(self.object_list.row(item))
-        self._emit_changed()
+    # ------------------------------------------------------------------ templates
+    def _fill_templates(self, current: str | None = None):
+        """Rebuild the template list; ``current`` stays selected without being applied."""
+        self._filling_templates = True
+        self.template.set_items([(None, tr("Choose template …"))] + [
+            (t.name, f"{t.name}: {', '.join(t.objects)}") for t in self.templates.templates()],
+            current)
+        self._filling_templates = False
+        self.delete_template_button.setEnabled(self.template.currentData() is not None)
+        self.restore_templates_button.setVisible(bool(self.templates.hidden))
+
+    def _store_templates(self):
+        self._settings.setValue("loop/templates", json.dumps(self.templates.to_dict()))
 
     def _apply_template(self):
-        index = self.template.currentData()
-        if index is None:
+        if self._filling_templates:
             return
-        # A template replaces the current list.
-        self.set_objects(name.strip() for name in tr(LOOP_TEMPLATES[index][1]).split(","))
-        self.template.setCurrentIndex(0)
+        name = self.template.currentData()
+        self.delete_template_button.setEnabled(name is not None)
+        template = self.templates.find(name) if name is not None else None
+        if template is not None:
+            # A template replaces the current list; it stays selected so that it can be
+            # changed and saved again under the same name, or deleted.
+            self.set_objects(template.objects)
+
+    def _save_template(self):
+        objects = self.objects()
+        if not objects:
+            QMessageBox.information(self, tr("Save template"),
+                                    tr("The list is empty – enter objects first."))
+            return
+        name, ok = QInputDialog.getText(self, tr("Save template"), tr("Name of the template:"),
+                                        text=self.template.currentData() or "")
+        name = name.strip()
+        if not ok or not name:
+            return
+        existing = self.templates.find(name)
+        if existing is not None and QMessageBox.question(
+                self, tr("Save template"),
+                tr("A template named \"{name}\" already exists. Replace it?", name=existing.name)
+        ) != QMessageBox.Yes:
+            return
+        self.templates.save(name, objects)
+        self._store_templates()
+        self._fill_templates(name)
+
+    def _delete_template(self):
+        name = self.template.currentData()
+        template = self.templates.find(name) if name is not None else None
+        if template is None:
+            return
+        if QMessageBox.question(self, tr("Delete template"),
+                                tr("Delete the template \"{name}\"? The list below is kept.",
+                                   name=template.name)) != QMessageBox.Yes:
+            return
+        self.templates.delete(template.name)
+        self._store_templates()
+        self._fill_templates()
+
+    def _restore_templates(self):
+        self.templates.restore()
+        self._store_templates()
+        self._fill_templates(self.template.currentData())
 
     # ------------------------------------------------------------------ state
     def is_loop(self) -> bool:
@@ -272,11 +351,18 @@ class PlanCard(Card):
         else:
             parts.append(tr("as many points as possible"))
         if self.is_loop():
-            selected = len(configs) or 1
-            objects = len(self.objects())
-            parts.insert(0, tr("{objects} objects · {devices} instrument(s) → {steps} steps",
-                               objects=objects, devices=selected,
-                               steps=step_count(objects, selected)))
+            lists = self.object_lists() or {"": self.objects()}
+            steps = max(len(names) for names in lists.values())
+            if len(lists) > 1:
+                counts = ", ".join(f"{device}: {len(names)}" for device, names in lists.items())
+                parts.insert(0, tr("Objects {counts} → {steps} steps", counts=counts,
+                                   steps=steps))
+            else:
+                parts.insert(0, tr("{n} objects", n=steps))
+            for device, names in lists.items():
+                if device and not names and steps:
+                    parts.append(tr("⚠ {device} has no objects and is not measured",
+                                    device=device))
             if plan.duration is None:
                 parts.append(tr("⚠ Unlimited: every step runs until stopped"))
         expected = 1 if plan.duration == 0 else points
@@ -324,7 +410,7 @@ class PlanCard(Card):
         settings.setValue("plan/duration", "None" if plan.duration is None else plan.duration)
         settings.setValue("plan/interval", plan.interval)
         settings.setValue("plan/mode", self.mode.currentData())
-        settings.setValue("loop/objects", json.dumps(self.objects()))
+        settings.setValue("loop/objects", json.dumps(self._lists))
         settings.setValue("loop/advance", self.advance.currentData())
         settings.setValue("loop/pause", self.pause.value())
         settings.setValue("stability/on", self.stability_on.isChecked())
@@ -338,7 +424,7 @@ class PlanCard(Card):
             "mode": self.mode.currentData(),
             "duration": self.duration.seconds(),
             "interval": float(self.interval.seconds() or 0),
-            "objects": self.objects(),
+            "objects": {device: list(names) for device, names in self._lists.items()},
             "advance": self.advance.currentData(),
             "pause": self.pause.value(),
             "stability": {"on": self.stability_on.isChecked(),
@@ -354,8 +440,9 @@ class PlanCard(Card):
             self.duration.set_seconds(plan["duration"])
         if "interval" in plan:
             self.interval.set_seconds(plan["interval"])
-        if isinstance(plan.get("objects"), list):
-            self.set_objects(plan["objects"])
+        if isinstance(plan.get("objects"), (list, dict)):
+            self._lists = object_lists_from(plan["objects"])
+            self._show_list()
         if plan.get("advance"):
             self.advance.select_data(plan["advance"])
         if "pause" in plan:

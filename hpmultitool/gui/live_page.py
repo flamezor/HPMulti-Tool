@@ -56,6 +56,7 @@ class LivePanel(QFrame):
 
     config_changed = Signal(int, object)   # slot, DeviceConfig
     pause_toggled = Signal(int, bool)
+    reset_requested = Signal(int)          # slot: clear statistics and chart curve
 
     def __init__(self, slot: int, info: DeviceInfo, config: DeviceConfig, color: str):
         super().__init__()
@@ -103,8 +104,8 @@ class LivePanel(QFrame):
         self.stats = muted("", wrap=False)
         self.stats.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         reset = _key(tr("↺ Reset"), checkable=False)
-        reset.setToolTip(tr("Reset min / max / average"))
-        reset.clicked.connect(self.reset_stats)
+        reset.setToolTip(tr("Reset min / max / average and the chart of this instrument"))
+        reset.clicked.connect(self._reset_clicked)
         stats.addWidget(self.stats, 1)
         stats.addWidget(reset)
         layout.addLayout(stats)
@@ -306,6 +307,10 @@ class LivePanel(QFrame):
             self.stats.setText(f"MIN {fmt(stats['min'])}   MAX {fmt(stats['max'])}   "
                                f"Ø {fmt(stats['mean'])}   n = {stats['count']}")
 
+    def _reset_clicked(self):
+        self.reset_stats()
+        self.reset_requested.emit(self.slot)
+
     def reset_stats(self):
         self.values.clear()
         self.times.clear()
@@ -455,6 +460,7 @@ class LivePage(QWidget):
         self.start_button.style().unpolish(self.start_button)
         self.start_button.style().polish(self.start_button)
         self.record_button.setEnabled(True)
+        self.png_button.setEnabled(True)
         self.placeholder.setVisible(False)
         self.main.log_message(tr("Live mode started."))
         self.running_changed.emit(True)
@@ -498,6 +504,7 @@ class LivePage(QWidget):
             panel = LivePanel(slot, info, config, color)
             panel.config_changed.connect(self._config_changed)
             panel.pause_toggled.connect(self._pause_toggled)
+            panel.reset_requested.connect(self._reset_chart)
             self.panels.append(panel)
             self.panel_row.addWidget(panel, 1)
             item = self.plot_widget.addPlot(row=slot, col=0,
@@ -532,6 +539,14 @@ class LivePage(QWidget):
     def _pause_toggled(self, slot: int, paused: bool):
         if self.session is not None:
             self.session.devices[slot].set_paused(paused)
+
+    def _reset_chart(self, slot: int):
+        """Start the chart curve of one instrument afresh (a recording is not affected)."""
+        if 0 <= slot < len(self.data):
+            xs, ys = self.data[slot]
+            xs.clear()
+            ys.clear()
+            self._set_dirty()
 
     def _rate_changed(self):
         rate = float(self.rate.currentData() or 0)
@@ -643,7 +658,6 @@ class LivePage(QWidget):
             self.record_button.setText(tr("●  Record"))
             self.record_label.setText(tr("Recorded: {n} readings – export under Measurement "
                                          "› Export", n=count))
-            self.png_button.setEnabled(True)
             self.record_ready.emit(self.record)
             return
         if not self.running:
@@ -668,7 +682,6 @@ class LivePage(QWidget):
         for slot, panel in enumerate(self.panels):
             self._new_segment(slot, panel.active)
         self.record_button.setText(tr("■  Stop recording"))
-        self.png_button.setEnabled(True)
         self.main.log_message(tr("Recording started."))
 
     def _new_segment(self, slot: int, config: DeviceConfig):

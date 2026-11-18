@@ -35,6 +35,11 @@ class TranslationTests(unittest.TestCase):
                  if sorted(PLACEHOLDER.findall(en)) != sorted(PLACEHOLDER.findall(de))]
         self.assertEqual(wrong, [])
 
+    def test_placeholder_named_text(self):
+        # "text" is also the name of tr()'s first parameter: must not collide
+        from hpmultitool.i18n import tr
+        self.assertEqual(tr("{text!r} shown", text="test1"), "'test1' shown")
+
     def test_no_unused_entries(self):
         unused = sorted(set(DE) - set(marked_texts()))
         self.assertEqual(unused, [], "Unused catalogue entries")

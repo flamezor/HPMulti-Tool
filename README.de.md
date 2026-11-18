@@ -73,7 +73,8 @@ Standard ist die Systemsprache).
 2. **Geräteeinstellungen** – pro Gerät ein Reiter. Es werden nur Optionen angezeigt, die zur
    gewählten Funktion passen. Die Einstellungen werden pro Gerätekennung gespeichert.
 3. **Messablauf** – *Fortlaufende Messung* (Dauer oder unbegrenzt, Intervall) oder
-   *Messreihe (Loop)* mit Objektliste, dann *Messung starten*.
+   *Messreihe (Loop)* mit einer Objektliste je Gerät (eines pro Zeile; eigene Listen lassen sich
+   als Vorlage speichern), dann *Messung starten*.
 4. **Export** – nach der Messung als `.csv` oder `.txt`.
 
 Das Hilfefenster (F1) erklärt alle Funktionen ausführlich.
